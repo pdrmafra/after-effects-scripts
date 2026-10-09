@@ -9,14 +9,12 @@ function showStrokePrototype() {
     var action=original.add("dropdownlist",undefined,["Keep disabled","Delete"]);action.selection=saved.originalAction==="delete" ? 1 : 0;
     var animate=win.add("checkbox",undefined,"Animate Trim Paths");
     animate.value=saved.animate;
-    var reverse=win.add("checkbox",undefined,"Reverse");
-    reverse.value=saved.reverse;
     var buttons=win.add("group");buttons.alignment="right";
     var create=buttons.add("button",undefined,"Create",{name:"ok"});
     buttons.add("button",undefined,"Cancel",{name:"cancel"});
     create.onClick=function(){
         try {
-            var options={reverse:reverse.value,animate:animate.value,frames:12,originalAction:action.selection.index===1 ? "delete" : "disable"};
+            var options={animate:animate.value,frames:12,originalAction:action.selection.index===1 ? "delete" : "disable"};
             PedroStrokeHost.create(comp,comp.selectedLayers,options);
             PedroStrokeSettings.write(options);
             win.close(1);

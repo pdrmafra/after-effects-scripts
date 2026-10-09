@@ -22,25 +22,29 @@ var PedroStrokeHost={create:function(comp,layers,options){calls.push(options);if
   for(const file of ["settings.jsxinc","ui.jsxinc"]) vm.runInContext(fs.readFileSync(__dirname+"/"+file,"utf8"),c);
   return JSON.parse(JSON.stringify(vm.runInContext("({widgets:widgets.map(function(w){return {type:w.type,text:w.text,properties:w.properties};}),calls:calls,alerts:alerts,closed:closed,record:record})",c)));
 }
-test("dialog exposes only original action, animated trim, reverse, Create and Cancel",()=>{
+test("dialog exposes only original action, animated trim, Create and Cancel",()=>{
   const r=run("cancel");
   assert.deepEqual(r.widgets.filter(w=>w.type==="dropdownlist").map(w=>w.text),[["Keep disabled","Delete"]]);
-  assert.deepEqual(r.widgets.filter(w=>w.type==="checkbox").map(w=>w.text),["Animate Trim Paths","Reverse"]);
+  assert.deepEqual(r.widgets.filter(w=>w.type==="checkbox").map(w=>w.text),["Animate Trim Paths"]);
   assert.deepEqual(r.widgets.filter(w=>w.type==="button").map(w=>w.text),["Create","Cancel"]);
   assert.equal(r.widgets.filter(w=>w.type==="edittext").length,0);assert.equal(r.calls.length,0);
 });
 test("default creates disabled-original replacement, without animated trim or success prompt",()=>{
-  const r=run("create");assert.deepEqual(r.calls,[{reverse:false,animate:false,frames:12,originalAction:"disable"}]);assert.equal(r.closed,1);assert.deepEqual(r.alerts,[]);
+  const r=run("create");assert.deepEqual(r.calls,[{animate:false,frames:12,originalAction:"disable"}]);assert.equal(r.closed,1);assert.deepEqual(r.alerts,[]);
 });
-test("explicit delete / animated trim / reverse are passed correctly",()=>{
-  const r=run("delete");assert.deepEqual(r.calls,[{reverse:true,animate:true,frames:12,originalAction:"delete"}]);assert.equal(r.closed,1);assert.deepEqual(r.alerts,[]);assert.equal(r.record,"v1|delete|1|1");
+test("explicit delete / animated trim are passed correctly",()=>{
+  const r=run("delete");assert.deepEqual(r.calls,[{animate:true,frames:12,originalAction:"delete"}]);assert.equal(r.closed,1);assert.deepEqual(r.alerts,[]);assert.equal(r.record,"v2|delete|1");
 });
 test("failure keeps dialog open and reports the error",()=>{
   const r=run("fail","v1|disable|1|0");assert.equal(r.closed,null);assert.equal(r.alerts.length,1);assert.match(r.alerts[0],/unsupported/);assert.equal(r.record,"v1|disable|1|0");
 });
-test("fresh dialog session restores all three saved options",()=>{
+test("fresh dialog session restores both saved options",()=>{
   const first=run("delete");const second=run("create",first.record);
-  assert.deepEqual(second.calls,[{reverse:true,animate:true,frames:12,originalAction:"delete"}]);
+  assert.deepEqual(second.calls,[{animate:true,frames:12,originalAction:"delete"}]);
+});
+test("a record saved before Reverse was removed still restores its other choices",()=>{
+  const r=run("create","v1|delete|1|1");
+  assert.deepEqual(r.calls,[{animate:true,frames:12,originalAction:"delete"}]);assert.equal(r.record,"v2|delete|1");
 });
 test("changing controls then cancelling does not replace saved options",()=>{
   const r=run("changed-cancel","v1|disable|0|0");assert.equal(r.calls.length,0);assert.equal(r.record,"v1|disable|0|0");

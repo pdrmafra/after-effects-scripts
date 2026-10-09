@@ -1,4 +1,4 @@
-// Deliberately creates and leaves two synthetic demo comps. Never saves the project.
+// Deliberately creates and leaves three synthetic demo comps (READY, SKIP, ICONS). Never saves the project.
 (function () {
     #include "circular.jsxinc"
     #include "outlines.jsxinc"

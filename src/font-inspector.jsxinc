@@ -424,7 +424,7 @@
                 try {
                     if (!file.write(field.text)) throw new Error("Could not write the report.");
                 } finally { file.close(); }
-            } catch (error) { alert("Could not save report:\\n" + error.toString()); }
+            } catch (error) { alert("Could not save report:\n" + error.toString()); }
         };
         dialog.onResizing = dialog.onResize = function () { this.layout.resize(); };
         dialog.center();

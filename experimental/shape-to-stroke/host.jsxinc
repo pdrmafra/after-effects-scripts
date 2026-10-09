@@ -50,6 +50,10 @@ var PedroStrokeHost = (function () {
             var shapes=[];
             for(var pi=0;pi<2;pi++) {
                 if(found.paths[pi].matchName!=="ADBE Vector Shape - Group") fail("Frame contours must be Bezier paths. Convert native shapes to Bezier first.");
+                // AE stores 1 or 2 for normal paths and 3 for Reverse Path Direction. Reversal flips
+                // the winding the fill rule sees, which the recognizers read from the vertex order.
+                var direction=found.paths[pi].property("ADBE Vector Shape Direction");
+                if(direction && direction.value===3) fail("Reverse Path Direction is on for a ring/frame path. It changes which area is filled: turn it off (switch the Fill Rule to Even-Odd if the hole disappears) and run again.");
                 shapes.push(found.paths[pi].property("ADBE Vector Shape").value);
             }
             var rule=found.fill.property("ADBE Vector Fill Rule");
@@ -90,7 +94,7 @@ var PedroStrokeHost = (function () {
         var c=contentsAt(copy,plan.chain);
         for(var i=c.numProperties;i>=1;i--) c.property(i).remove();
         var path=c.addProperty("ADBE Vector Shape - Group");path.name="Recovered Centerline";
-        var data=PedroStrokeCircular.path(plan.geometry,options.reverse);
+        var data=PedroStrokeCircular.path(plan.geometry,false);
         path.property("ADBE Vector Shape").setValue(shape(data));
         // Indexed groups invalidate property handles after addProperty: reacquire each time.
         var stroke=contentsAt(copy,plan.chain).addProperty("ADBE Vector Graphic - Stroke");
@@ -127,7 +131,7 @@ var PedroStrokeHost = (function () {
         options=options || {};
         var action=options.originalAction || "disable";
         if(action!=="disable" && action!=="delete") fail("Original action must be disable or delete.");
-        options={originalAction:action,reverse:options.reverse,animate:options.animate,frames:options.frames};
+        options={originalAction:action,animate:options.animate,frames:options.frames};
         if(options.animate && (!/^[1-9][0-9]*$/.test(String(options.frames)) || Number(options.frames)>10000)) fail("Draw-on duration must be 1–10000 whole frames.");
         var results=analyze(layers),plans=[],i;
         for(i=0;i<results.length;i++) {

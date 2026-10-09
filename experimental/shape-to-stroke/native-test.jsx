@@ -62,33 +62,33 @@
             assert(!f.layer.enabled && copy.selected,"Wrong conversion state");
             c.saveFrameToPng(0,new File(outputDir.fsName+"/"+row[0]+"-after.png"));
         });})(curveRows[ci]);
-        for(var curvedType=0;curvedType<2;curvedType++)(function(isRing){test((isRing ? "ring" : "arc")+" reverse handles / linear animated trim",function(){
+        for(var curvedType=0;curvedType<2;curvedType++)(function(isRing){test((isRing ? "ring" : "arc")+" handles / linear animated trim",function(){
             var c=fresh(),f=PedroStrokeFixtures.fromCase(c,entryNamed(isRing ? "Ring compound path" : "Three-quarter arc"));
             f.layer.property("ADBE Transform Group").property("ADBE Position").setValue([240,180]);c.time=0.5;
-            var expected=PedroStrokeCircular.path(PedroStrokeHost.snapshot(f.layer).geometry,true);
-            var copy=PedroStrokeHost.create(c,[f.layer],{reverse:true,animate:true,frames:12})[0];
+            var expected=PedroStrokeCircular.path(PedroStrokeHost.snapshot(f.layer).geometry,false);
+            var copy=PedroStrokeHost.create(c,[f.layer],{animate:true,frames:12})[0];
             var out=PedroStrokeHost.contentsAt(copy,f.chain),s=out.property(1).property("ADBE Vector Shape").value;
             assert(s.closed===isRing && s.vertices.length===expected.vertices.length,"Wrong animated curve topology");
-            for(var vi=0;vi<s.vertices.length;vi++)for(var d=0;d<2;d++)assert(near(s.vertices[vi][d],expected.vertices[vi][d]) && near(s.inTangents[vi][d],expected.inTangents[vi][d]) && near(s.outTangents[vi][d],expected.outTangents[vi][d]),"Reverse point / handle mismatch");
+            for(var vi=0;vi<s.vertices.length;vi++)for(var d=0;d<2;d++)assert(near(s.vertices[vi][d],expected.vertices[vi][d]) && near(s.inTangents[vi][d],expected.inTangents[vi][d]) && near(s.outTangents[vi][d],expected.outTangents[vi][d]),"Point / handle mismatch");
             var end=out.property(3).property("ADBE Vector Trim End");assert(end.numKeys===2 && near(end.valueAtTime(0.75,false),50),"Curved trim motion mismatch");
             for(var fi=0;fi<5;fi++)c.saveFrameToPng(0.5+fi*0.125,new File(outputDir.fsName+"/motion-"+(isRing ? "ring" : "arc")+"-"+fi+".png"));
         });})(curvedType===0);
         var motionRows=[["frame","Star frame"],["rounded-frame","Rounded rectangle frame"],["connector","Z connector"],["round-arc","Round-ended three-quarter arc"]];
-        for(var mi=0;mi<motionRows.length;mi++)(function(row){test(row[0]+" reverse / draw-on / seam / metadata",function(){
+        for(var mi=0;mi<motionRows.length;mi++)(function(row){test(row[0]+" draw-on / seam / metadata",function(){
             var c=fresh(),f=PedroStrokeFixtures.fromCase(c,entryNamed(row[1]));f.layer.property("ADBE Transform Group").property("ADBE Position").setValue([240,180]);c.time=0.5;
-            var before=PedroStrokeHost.snapshot(f.layer).geometry,expected=PedroStrokeCircular.path(before,true),copy=PedroStrokeHost.create(c,[f.layer],{reverse:true,animate:true,frames:12})[0];
+            var before=PedroStrokeHost.snapshot(f.layer).geometry,expected=PedroStrokeCircular.path(before,false),copy=PedroStrokeHost.create(c,[f.layer],{animate:true,frames:12})[0];
             var out=PedroStrokeHost.contentsAt(copy,f.chain),s=out.property(1).property("ADBE Vector Shape").value;
             assert(s.closed===!!before.closed && s.vertices.length===expected.vertices.length,"Wrong topology");
-            for(var vi=0;vi<s.vertices.length;vi++)for(var d=0;d<2;d++)assert(near(s.vertices[vi][d],expected.vertices[vi][d]) && near(s.inTangents[vi][d],expected.inTangents[vi][d]) && near(s.outTangents[vi][d],expected.outTangents[vi][d]),"Reverse verification failed");
+            for(var vi=0;vi<s.vertices.length;vi++)for(var d=0;d<2;d++)assert(near(s.vertices[vi][d],expected.vertices[vi][d]) && near(s.inTangents[vi][d],expected.inTangents[vi][d]) && near(s.outTangents[vi][d],expected.outTangents[vi][d]),"Point / handle verification failed");
             var end=out.property(3).property("ADBE Vector Trim End");assert(end.numKeys===2 && near(end.keyTime(1),0.5) && near(end.keyTime(2),1) && near(end.valueAtTime(0.75,false),50),"Wrong linear draw-on");
             for(var fi=0;fi<5;fi++)c.saveFrameToPng(0.5+fi*0.125,new File(outputDir.fsName+"/motion-"+row[0]+"-"+fi+".png"));
         });})(motionRows[mi]);
-        test("reverse / draw-on / keep disabled",function(){
+        test("draw-on / keep disabled",function(){
             var c=fresh(),f=PedroStrokeFixtures.source(c,"Source",false,true,0,false);c.time=0.5;
             var model=PedroStrokeHost.snapshot(f.layer).geometry;
-            var copy=PedroStrokeHost.create(c,[f.layer],{reverse:true,animate:true,frames:12,originalAction:"disable"})[0];
+            var copy=PedroStrokeHost.create(c,[f.layer],{animate:true,frames:12,originalAction:"disable"})[0];
             var out=PedroStrokeHost.contentsAt(copy,f.chain),s=out.property(1).property("ADBE Vector Shape").value;
-            assert(near(s.vertices[0][0],model.vertices[1][0]),"Direction not reversed");
+            assert(near(s.vertices[0][0],model.vertices[0][0]),"Wrong default direction");
             var end=out.property(3).property("ADBE Vector Trim End");
             assert(end.numKeys===2 && near(end.keyTime(1),0.5) && near(end.keyTime(2),1) && near(end.valueAtTime(0.75,false),50),"Wrong motion");
             assert(!f.layer.enabled,"Original not hidden explicitly");
@@ -131,7 +131,7 @@
         });
         test("mixed ring / arc Delete verifies both curved replacements before removing originals",function(){
             var c=fresh(),a=PedroStrokeFixtures.fromCase(c,entryNamed("Ring compound path")),b=PedroStrokeFixtures.fromCase(c,entryNamed("Three-quarter arc"));
-            var ids=[a.layer.id,b.layer.id],chains=[a.chain,b.chain],copies=PedroStrokeHost.create(c,[a.layer,b.layer],{originalAction:"delete",reverse:true});
+            var ids=[a.layer.id,b.layer.id],chains=[a.chain,b.chain],copies=PedroStrokeHost.create(c,[a.layer,b.layer],{originalAction:"delete"});
             assert(c.numLayers===2 && copies.length===2,"Wrong curved replacement count");
             for(var i=0;i<2;i++) {
                 assert(copies[i].id!==ids[0] && copies[i].id!==ids[1] && copies[i].selected,"Curved original not deleted");
@@ -139,10 +139,18 @@
                 assert(s.closed===(i===0) && s.vertices.length===4,"Wrong curved Delete geometry");
             }
         });
+        test("ring with Reverse Path Direction is refused without mutation",function(){
+            var c=fresh(),f=PedroStrokeFixtures.fromCase(c,entryNamed("Ring compound path"));
+            var direction=PedroStrokeHost.contentsAt(f.layer,f.chain).property(2).property("ADBE Vector Shape Direction");
+            assert(direction && direction.value!==3,"Unexpected default path direction");
+            direction.setValue(3);
+            rejects(function(){PedroStrokeHost.create(c,[f.layer],{originalAction:"delete"});});
+            assert(c.numLayers===1 && f.layer.enabled,"Reversed ring mutated");
+        });
         test("frame / connector / round arc batch Delete preserves joins, caps and selection",function(){
             var c=fresh(),names=["Triangle frame","Z connector","Round-ended quarter arc"],sources=[],ids=[],chains=[],models=[];
             for(var i=0;i<names.length;i++){var f=PedroStrokeFixtures.fromCase(c,entryNamed(names[i]));sources.push(f.layer);ids.push(f.layer.id);chains.push(f.chain);models.push(PedroStrokeHost.snapshot(f.layer).geometry);}
-            var copies=PedroStrokeHost.create(c,sources,{originalAction:"delete",reverse:true});assert(c.numLayers===3 && copies.length===3,"Wrong Delete batch size");
+            var copies=PedroStrokeHost.create(c,sources,{originalAction:"delete"});assert(c.numLayers===3 && copies.length===3,"Wrong Delete batch size");
             for(i=0;i<copies.length;i++) {
                 for(var j=0;j<ids.length;j++)assert(copies[i].id!==ids[j],"Original retained");
                 var out=PedroStrokeHost.contentsAt(copies[i],chains[i]);assert(copies[i].selected && out.property(1).property("ADBE Vector Shape").value.closed===!!models[i].closed,"Topology / selection changed");
@@ -163,20 +171,21 @@
                 assert(c.numLayers===before && f.layer.enabled,"Rejected case mutated");
             }
         });})(entries[ei]);
-        test("expanded demo: 48 READY / 25 SKIP layers",function(){
+        test("expanded demo: 48 READY / 25 SKIP / 33 ICON layers",function(){
             var demo=PedroStrokeFixtures.demo();
             for(var di=0;di<demo.comps.length;di++)owned.push(demo.comps[di]);
-            assert(demo.comps[0].numLayers===48 && demo.comps[1].numLayers===25,"Wrong demo counts");
+            assert(demo.comps.length===3 && demo.comps[0].numLayers===48 && demo.comps[1].numLayers===25 && demo.comps[2].numLayers===33,"Wrong demo counts");
             demo.comps[0].saveFrameToPng(0,new File(outputDir.fsName+"/fixtures-ready.png"));
             demo.comps[1].saveFrameToPng(0,new File(outputDir.fsName+"/fixtures-skip.png"));
+            demo.comps[2].saveFrameToPng(0,new File(outputDir.fsName+"/fixtures-icons.png"));
         });
         test("native option persistence in isolated test namespace / cleanup",function(){
             var section="PedroMafra.ShapeToStroke.Tests",key="options_v1",prefSection="Settings_"+section;
             var existed=app.settings.haveSetting(section,key),previous=existed ? app.settings.getSetting(section,key) : null;
             var api={haveSetting:function(s,k){return app.settings.haveSetting(section,k);},getSetting:function(s,k){return app.settings.getSetting(section,k);},saveSetting:function(s,k,v){app.settings.saveSetting(section,k,v);}};
             try {
-                assert(PedroStrokeSettings.write({originalAction:"delete",animate:true,reverse:true},api),"Preference write failed");
-                var saved=PedroStrokeSettings.read(api);assert(saved.originalAction==="delete" && saved.animate && saved.reverse,"Preference read mismatch");
+                assert(PedroStrokeSettings.write({originalAction:"delete",animate:true},api),"Preference write failed");
+                var saved=PedroStrokeSettings.read(api);assert(saved.originalAction==="delete" && saved.animate,"Preference read mismatch");
             } finally {
                 if(existed)app.settings.saveSetting(section,key,previous);
                 else {

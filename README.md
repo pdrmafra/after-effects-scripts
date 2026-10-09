@@ -41,7 +41,7 @@ npm run build
 npm run check
 ```
 
-Node 22 or newer is used for development/tests, not for running the five JSX tools. There are no npm dependencies. Root build/check commands include Shape to Stroke; **240 Node tests** cover the current collection. Native AE test scripts in `tools/` and `experimental/shape-to-stroke/` create disposable fixtures and must be run deliberately with permission. Depth tests and environment checks are documented separately.
+Node 22 or newer is used for development/tests, not for running the five JSX tools. There are no npm dependencies. Root build/check commands include Shape to Stroke. Node tests cover the whole collection; dated results are in [Validation](docs/validation.md). Native AE test scripts in `tools/` and `experimental/shape-to-stroke/` create disposable fixtures and must be run deliberately with permission. Depth tests and environment checks are documented separately.
 
 ## License and credits
 
