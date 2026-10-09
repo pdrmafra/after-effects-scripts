@@ -33,14 +33,6 @@ Builds `dist/after-effects-scripts-v<version>.zip` with only what users need: th
 
 `tools/native-test.jsx`, `tools/native-depth-test.jsx` and `experimental/shape-to-stroke/native-test.jsx` run inside an open AE project. They create and remove their own temporary comps, do not save the project, and write results next to themselves. Run them deliberately, on a disposable project, never in someone's live session. Optional render QA for Shape to Stroke: `python verify-renders.py` in its folder (numpy/opencv).
 
-## Shape to Stroke preview image
-
-```sh
-node experimental/shape-to-stroke/preview.js
-```
-
-Regenerates `images/icons-before-after.svg` from the ICONS test shapes using the tool's own geometry code. Rerun it after changing those shapes or the recognizers.
-
 ## Guide animations
 
 ```sh

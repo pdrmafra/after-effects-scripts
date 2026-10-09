@@ -33,8 +33,6 @@ Each shape layer must hold one outline (or two, for rings and frames) with a sin
 | Hollow polygon or rounded frame (two outlines) | Closed path with sharp or rounded corners |
 | Constant-width zigzag, L, V, Z, U, check mark… | Open polyline |
 
-![The 16 test icons: filled originals and the strokes recovered from them](images/icons-before-after.svg)
-
 Small irregularities are accepted when the new stroke's edge stays within about **half a pixel** of the original edge (less on very thin lines, at 100% layer scale). Look at the result before deleting an original.
 
 ## What it refuses
