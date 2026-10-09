@@ -1,0 +1,22 @@
+PedroAE.run("Spacing Keyframes", function () {
+    var comp = PedroAE.comp();
+    var win = new Window("dialog", "Spacing Keyframes");
+    win.orientation = "column";
+    win.alignChildren = ["fill", "top"];
+    var row = win.add("group");
+    row.add("statictext", undefined, "Spacing (whole frames):");
+    var input = row.add("edittext", undefined, "2");
+    input.characters = 6;
+    var current = win.add("checkbox", undefined, "Start at current time (otherwise first chosen key)");
+    var all = win.add("checkbox", undefined, "Move ALL keys in selected properties (otherwise selected keys only)");
+    win.add("statictext", undefined, "Unselected keys are retained. A collision cancels the entire operation.");
+    var buttons = win.add("group");
+    var apply = buttons.add("button", undefined, "Apply");
+    buttons.add("button", undefined, "Cancel", { name: "cancel" });
+    apply.onClick = function () {
+        try { PedroAE.space(comp, input.text, current.value, all.value); win.close(1); }
+        catch (error) { alert(error.toString()); }
+    };
+    win.center();
+    win.show();
+});

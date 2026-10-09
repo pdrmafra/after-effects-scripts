@@ -1,0 +1,16 @@
+.DS_Store
+node_modules/
+*.aep
+*.aepx
+*.log
+native-results.txt
+native-depth-results.txt
+dist/
+__pycache__/
+.venv/
+vendor/
+checkpoints/
+*.pth
+*.pt
+*.safetensors
+depth_complete.json

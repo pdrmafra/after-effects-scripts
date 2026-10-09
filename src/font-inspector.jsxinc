@@ -1,0 +1,578 @@
+(function fontInspector() {
+    var SCRIPT_NAME = "Font Inspector";
+
+    function getSelectedComp() {
+        if (app.project && app.project.activeItem instanceof CompItem) {
+            return app.project.activeItem;
+        }
+
+        if (app.project && app.project.selection && app.project.selection.length > 0) {
+            for (var i = 0; i < app.project.selection.length; i++) {
+                if (app.project.selection[i] instanceof CompItem) {
+                    return app.project.selection[i];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    function getSourceTextProperty(layer) {
+        try {
+            var textGroup = layer.property("ADBE Text Properties");
+            if (textGroup) {
+                var sourceText = textGroup.property("ADBE Text Document");
+                if (sourceText) {
+                    return sourceText;
+                }
+            }
+        } catch (e) {}
+
+        try {
+            return layer.property("Source Text");
+        } catch (e2) {
+            return null;
+        }
+    }
+
+    function pad(number) {
+        return number < 10 ? "0" + number : "" + number;
+    }
+
+    function formatTime(seconds) {
+        var sign = seconds < 0 ? "-" : "";
+        seconds = Math.abs(seconds);
+
+        var totalMilliseconds = Math.round(seconds * 1000);
+        var hours = Math.floor(totalMilliseconds / 3600000);
+        var minutes = Math.floor((totalMilliseconds % 3600000) / 60000);
+        var wholeSeconds = Math.floor((totalMilliseconds % 60000) / 1000);
+        var milliseconds = totalMilliseconds % 1000;
+
+        return sign + pad(hours) + ":" + pad(minutes) + ":" + pad(wholeSeconds) + "." + ("00" + milliseconds).slice(-3);
+    }
+
+    function cleanText(text) {
+        if (text === null || text === undefined) {
+            return "";
+        }
+
+        text = String(text);
+        text = text.replace(/\r/g, "\\r");
+        text = text.replace(/\n/g, "\\n");
+        text = text.replace(/\t/g, "\\t");
+        text = text.replace(/^\s+|\s+$/g, "");
+
+        if (text.length > 60) {
+            text = text.substring(0, 57) + "...";
+        }
+
+        return text;
+    }
+
+    function safeText(documentValue) {
+        try {
+            return String(documentValue.text || "");
+        } catch (e) {
+            return "";
+        }
+    }
+
+    function getFontName(rangeOrDocument) {
+        var postScript = "";
+        var family = "";
+        var style = "";
+
+        try {
+            postScript = rangeOrDocument.font || "";
+        } catch (e) {}
+
+        try {
+            family = rangeOrDocument.fontFamily || "";
+        } catch (e2) {}
+
+        try {
+            style = rangeOrDocument.fontStyle || "";
+        } catch (e3) {}
+
+        if (postScript) return postScript;
+
+        if (family && style) {
+            return family + " " + style + (postScript ? " (" + postScript + ")" : "");
+        }
+
+        if (family) {
+            return family + (postScript ? " (" + postScript + ")" : "");
+        }
+
+        return postScript || "[Unknown font]";
+    }
+
+    function addOccurrence(fontMap, fontOrder, fontName, occurrence) {
+        var key = "$" + fontName;
+
+        if (!fontMap[key]) {
+            fontMap[key] = {
+                name: fontName,
+                occurrences: []
+            };
+            fontOrder.push(key);
+        }
+
+        fontMap[key].occurrences.push(occurrence);
+    }
+
+    function makeOccurrence(compPath, layer, timeValue, timeLabel, characterRangeLabel, textSnippet) {
+        var textPart = textSnippet ? ' | text: "' + textSnippet + '"' : "";
+        var rangePart = characterRangeLabel ? " | chars: " + characterRangeLabel : "";
+        var label = compPath + " > Layer " + layer.index + " - " + layer.name + " | " + timeLabel + rangePart + textPart;
+
+        return {
+            label: label,
+            compPath: compPath,
+            comp: layer.containingComp,
+            layer: layer,
+            layerIndex: layer.index,
+            layerName: layer.name,
+            timeValue: timeValue,
+            timeLabel: timeLabel,
+            rangeLabel: characterRangeLabel,
+            textSnippet: textSnippet
+        };
+    }
+
+    function inspectTextDocument(documentValue, compPath, layer, timeValue, timeLabel, fontMap, fontOrder, stats) {
+        var fullText = safeText(documentValue);
+
+        if (!documentValue || fullText.length === 0) {
+            return;
+        }
+
+        if (typeof documentValue.characterRange !== "function") {
+            addOccurrence(
+                fontMap,
+                fontOrder,
+                getFontName(documentValue),
+                makeOccurrence(compPath, layer, timeValue, timeLabel, "", cleanText(fullText))
+            );
+            stats.usedFallback = true;
+            return;
+        }
+
+        var currentFont = null;
+        var runStart = 0;
+        var runText = "";
+        var foundRangeFont = false;
+
+        for (var i = 0; i < fullText.length; i++) {
+            var charRange = null;
+            var charFont = null;
+            var charText = "";
+
+            try {
+                charRange = documentValue.characterRange(i, i + 1);
+                charFont = getFontName(charRange);
+                charText = charRange.text;
+            } catch (e) {
+                stats.rangeErrors++;
+                continue;
+            }
+
+            foundRangeFont = true;
+
+            if (currentFont === null) {
+                currentFont = charFont;
+                runStart = i;
+                runText = charText;
+                continue;
+            }
+
+            if (charFont === currentFont) {
+                runText += charText;
+                continue;
+            }
+
+            addOccurrence(
+                fontMap,
+                fontOrder,
+                currentFont,
+                makeOccurrence(compPath, layer, timeValue, timeLabel, runStart + "-" + i, cleanText(runText))
+            );
+
+            currentFont = charFont;
+            runStart = i;
+            runText = charText;
+        }
+
+        if (currentFont !== null) {
+            addOccurrence(
+                fontMap,
+                fontOrder,
+                currentFont,
+                makeOccurrence(compPath, layer, timeValue, timeLabel, runStart + "-" + fullText.length, cleanText(runText))
+            );
+        }
+
+        if (!foundRangeFont) {
+            addOccurrence(
+                fontMap,
+                fontOrder,
+                getFontName(documentValue),
+                makeOccurrence(compPath, layer, timeValue, timeLabel, "", cleanText(fullText))
+            );
+            stats.usedFallback = true;
+        }
+    }
+
+    function inspectLayer(layer, compPath, fontMap, fontOrder, stats) {
+        var sourceText = getSourceTextProperty(layer);
+        if (!sourceText) {
+            return;
+        }
+
+        stats.textLayers++;
+        if (sourceText.expressionEnabled) stats.expressionLayers++;
+
+        try {
+            if (sourceText.numKeys && sourceText.numKeys > 0) {
+                for (var k = 1; k <= sourceText.numKeys; k++) {
+                    inspectTextDocument(
+                        sourceText.keyValue(k),
+                        compPath,
+                        layer,
+                        sourceText.keyTime(k),
+                        "key " + k + " @ " + formatTime(sourceText.keyTime(k)),
+                        fontMap,
+                        fontOrder,
+                        stats
+                    );
+                }
+            } else {
+                inspectTextDocument(
+                    sourceText.value,
+                    compPath,
+                    layer,
+                    layer.containingComp.time,
+                    "current value @ " + formatTime(layer.containingComp.time),
+                    fontMap,
+                    fontOrder,
+                    stats
+                );
+            }
+        } catch (e) {
+            stats.errors.push(compPath + " > Layer " + layer.index + " - " + layer.name + ": " + e.toString());
+        }
+    }
+
+    function getPrecompFromLayer(layer) {
+        try {
+            if (layer.source && layer.source instanceof CompItem) {
+                return layer.source;
+            }
+        } catch (e) {}
+
+        return null;
+    }
+
+    function compVisitKey(comp) {
+        try {
+            return String(comp.id);
+        } catch (e) {
+            return comp.name;
+        }
+    }
+
+    function inspectComp(comp, compPath, activeStack, fontMap, fontOrder, stats) {
+        var key = compVisitKey(comp);
+
+        if (activeStack[key]) {
+            stats.skippedCycles++;
+            stats.errors.push("Circular precomp skipped: " + compPath);
+            return;
+        }
+
+        activeStack[key] = true;
+        stats.compsInspected++;
+
+        for (var i = 1; i <= comp.numLayers; i++) {
+            var layer = comp.layer(i);
+
+            inspectLayer(layer, compPath, fontMap, fontOrder, stats);
+
+            var precomp = getPrecompFromLayer(layer);
+            if (precomp) {
+                inspectComp(
+                    precomp,
+                    compPath + " > Layer " + layer.index + " - " + layer.name + " > " + precomp.name,
+                    activeStack,
+                    fontMap,
+                    fontOrder,
+                    stats
+                );
+            }
+        }
+
+        activeStack[key] = false;
+    }
+
+    function sortFontKeys(fontMap, fontOrder) {
+        fontOrder.sort(function (a, b) {
+            var nameA = fontMap[a].name.toLowerCase();
+            var nameB = fontMap[b].name.toLowerCase();
+
+            if (nameA < nameB) return -1;
+            if (nameA > nameB) return 1;
+            return 0;
+        });
+    }
+
+    function buildReport(comp, fontMap, fontOrder, stats) {
+        sortFontKeys(fontMap, fontOrder);
+
+        var lines = [];
+        lines.push("Font Inspector");
+        lines.push("Comp: " + comp.name);
+        lines.push("Scope: Source Text keyframes, or the current value for unkeyed text. Includes nested comps.");
+        lines.push("Text animators and expression-driven font changes over time are not exhaustively sampled.");
+        lines.push("Character ranges are UTF-16 offsets, end-exclusive.");
+        lines.push("Comp instances inspected: " + stats.compsInspected);
+        lines.push("Text layer instances found: " + stats.textLayers);
+        lines.push("Fonts found: " + fontOrder.length);
+        lines.push("");
+
+        if (fontOrder.length === 0) {
+            lines.push("No fonts found in text layers in this comp.");
+        }
+
+        for (var i = 0; i < fontOrder.length; i++) {
+            var item = fontMap[fontOrder[i]];
+            lines.push(item.name);
+            lines.push("Used in " + item.occurrences.length + " text run(s):");
+
+            for (var j = 0; j < item.occurrences.length; j++) {
+                lines.push("  - " + item.occurrences[j].label);
+            }
+
+            lines.push("");
+        }
+
+        if (stats.usedFallback) {
+            lines.push("Note: characterRange() was unavailable for some text.");
+            lines.push("For that text, only the font returned by TextDocument (usually the first character) is reported.");
+            lines.push("");
+        }
+
+        if (stats.rangeErrors) lines.push("WARNING: " + stats.rangeErrors + " character ranges could not be read; the inventory is incomplete.");
+        if (stats.expressionLayers) lines.push("WARNING: " + stats.expressionLayers + " text layer instances have Source Text expressions; animated expression fonts may be missing.");
+
+        if (stats.errors.length > 0) {
+            lines.push("Errors:");
+            for (var e = 0; e < stats.errors.length; e++) {
+                lines.push("  - " + stats.errors[e]);
+            }
+        }
+
+        return lines.join("\n");
+    }
+
+    function shortenMiddle(text, maxLength) {
+        text = String(text);
+
+        if (text.length <= maxLength) {
+            return text;
+        }
+
+        var leftLength = Math.floor((maxLength - 5) / 2);
+        var rightLength = maxLength - 5 - leftLength;
+        return text.substring(0, leftLength) + " ... " + text.substring(text.length - rightLength);
+    }
+
+    function buildOccurrenceRows(fontMap, fontOrder) {
+        var rows = [];
+
+        for (var i = 0; i < fontOrder.length; i++) {
+            var item = fontMap[fontOrder[i]];
+
+            for (var j = 0; j < item.occurrences.length; j++) {
+                rows.push({
+                    fontName: item.name,
+                    occurrence: item.occurrences[j],
+                    label: shortenMiddle(item.name + " | " + item.occurrences[j].label, 180)
+                });
+            }
+        }
+
+        return rows;
+    }
+
+    function showTextReport(text) {
+        var dialog = new Window("dialog", "Font Inspector — Full Report", undefined, { resizeable: true });
+        dialog.orientation = "column";
+        dialog.alignChildren = ["fill", "fill"];
+        dialog.add("statictext", undefined, "Click the report, then Cmd/Ctrl+A and Cmd/Ctrl+C. Text may contain private client copy.");
+        var field = dialog.add("edittext", undefined, text, { multiline: true, scrolling: true });
+        field.preferredSize = [700, 400];
+        var actions = dialog.add("group");
+        var save = actions.add("button", undefined, "Save Report...");
+        actions.add("button", undefined, "Close", { name: "ok" });
+        save.onClick = function () {
+            var file = File.saveDialog("Save Font Inspector report", "*.txt");
+            if (!file) return;
+            try {
+                file.encoding = "UTF-8";
+                if (!file.open("w")) throw new Error("Could not open the selected file.");
+                try {
+                    if (!file.write(field.text)) throw new Error("Could not write the report.");
+                } finally { file.close(); }
+            } catch (error) { alert("Could not save report:\\n" + error.toString()); }
+        };
+        dialog.onResizing = dialog.onResize = function () { this.layout.resize(); };
+        dialog.center();
+        dialog.show();
+    }
+
+    function deselectAllLayers(comp) {
+        for (var i = 1; i <= comp.numLayers; i++) {
+            try {
+                comp.layer(i).selected = false;
+            } catch (e) {}
+        }
+    }
+
+    function revealOccurrence(row) {
+        if (!row || !row.occurrence || !row.occurrence.comp) {
+            return;
+        }
+
+        var occurrence = row.occurrence;
+        var comp = occurrence.comp;
+        var layer = null;
+
+        try {
+            layer = occurrence.layer;
+            if (!layer || layer.containingComp !== comp) throw new Error("Layer no longer belongs to this comp.");
+        } catch (e) {
+            throw new Error("Layer not found: " + occurrence.layerName);
+        }
+
+        if (!layer) {
+            throw new Error("Layer changed since inspection: " + occurrence.layerName);
+        }
+
+        comp.openInViewer();
+
+        if (occurrence.timeValue !== null && occurrence.timeValue !== undefined) {
+            comp.time = occurrence.timeValue;
+        }
+
+        deselectAllLayers(comp);
+        layer.selected = true;
+    }
+
+    function showReport(report, fontMap, fontOrder) {
+        var win = new Window("dialog", SCRIPT_NAME, undefined, { resizeable: true });
+        win.orientation = "column";
+        win.alignChildren = ["fill", "top"];
+        win.spacing = 8;
+        win.margins = 12;
+
+        var rows = buildOccurrenceRows(fontMap, fontOrder);
+
+        var info = win.add("statictext", undefined, "Select an occurrence to reveal its layer, or open the full report.");
+        info.alignment = ["fill", "top"];
+
+        var occurrenceList = win.add("listbox", undefined, [], {
+            multiselect: false
+        });
+        occurrenceList.alignment = ["fill", "fill"];
+        occurrenceList.preferredSize = [820, 420];
+        occurrenceList.minimumSize = [560, 260];
+
+        for (var i = 0; i < rows.length; i++) {
+            occurrenceList.add("item", rows[i].label);
+        }
+
+        if (rows.length > 0) {
+            occurrenceList.selection = 0;
+        }
+
+        var buttons = win.add("group");
+        buttons.orientation = "row";
+        buttons.alignChildren = ["fill", "center"];
+        buttons.alignment = ["right", "top"];
+
+        var revealBtn = buttons.add("button", undefined, "Reveal Layer");
+        var copyBtn = buttons.add("button", undefined, "Full Report...");
+        buttons.add("button", undefined, "Close", { name: "ok" });
+
+        function revealSelectedOccurrence(closeAfterReveal) {
+            try {
+                if (!occurrenceList.selection) {
+                    alert("Select an occurrence first.");
+                    return;
+                }
+
+                revealOccurrence(rows[occurrenceList.selection.index]);
+
+                if (closeAfterReveal) {
+                    win.close();
+                }
+            } catch (error) {
+                alert("Could not reveal layer:\n" + error.toString());
+            }
+        }
+
+        revealBtn.onClick = function () {
+            revealSelectedOccurrence(false);
+        };
+
+        occurrenceList.onDoubleClick = function () {
+            revealSelectedOccurrence(true);
+        };
+
+        copyBtn.onClick = function () { showTextReport(report); };
+
+        win.onResizing = win.onResize = function () {
+            this.layout.resize();
+        };
+
+        win.preferredSize = [860, 540];
+        win.center();
+        win.show();
+    }
+
+    function run() {
+        if (!app.project) {
+            alert("Open a project before running this script.", SCRIPT_NAME);
+            return;
+        }
+
+        var comp = getSelectedComp();
+        if (!comp) {
+            alert("Open a composition, or select a comp in the Project panel.", SCRIPT_NAME);
+            return;
+        }
+
+        var fontMap = {};
+        var fontOrder = [];
+        var stats = {
+            textLayers: 0,
+            compsInspected: 0,
+            skippedCycles: 0,
+            errors: [],
+            usedFallback: false,
+            rangeErrors: 0,
+            expressionLayers: 0
+        };
+
+        inspectComp(comp, comp.name, {}, fontMap, fontOrder, stats);
+
+        showReport(buildReport(comp, fontMap, fontOrder, stats), fontMap, fontOrder);
+    }
+
+    try {
+        run();
+    } catch (error) {
+        alert("Font Inspector failed:\n" + error.toString(), SCRIPT_NAME);
+    }
+})();

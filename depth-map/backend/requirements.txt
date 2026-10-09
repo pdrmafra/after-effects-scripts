@@ -1,0 +1,13 @@
+# Direct dependency versions from the tested Python 3.12 macOS environment.
+# This is not a complete transitive lockfile or a Windows/CUDA compatibility claim.
+opencv-python==4.13.0.92
+numpy==2.4.4
+torch==2.11.0
+timm==1.0.26
+torchvision==0.26.0
+imageio==2.37.3
+imageio-ffmpeg==0.6.0
+einops==0.8.2
+easydict==1.13
+matplotlib==3.10.9
+tqdm==4.67.3
