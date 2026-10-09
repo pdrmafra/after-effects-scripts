@@ -21,6 +21,8 @@ Frames require exactly two closed Bezier contours and one solid fill in the same
 
 Straight offsets are checked analytically. Conventional circular cubic segments are fitted and sampled, not assumed mathematically exact circles. Sharp polygon joins use explicit miter settings sized for the recovered corners, with a conservative extension bound. Safe normalization removes zero-length edges, redundant collinear vertices and ordered straight cubic handles without modifying the source arrays. If the outer start was redundant, normalization may move the generated seam; Reverse preserves the resulting closed seam.
 
+Frames and angular connectors also accept near-uniform thickness: each measured separation may differ from the first matched side's start width by at most `max(0.005, width × 0.05)` local units. This 5% allowance produces a constant-width approximation; compare source and replacement before discarding the original. It is not a 5% bound on rendered pixels. Angular correspondence, concentric curved corners, perpendicular caps, topology and containment remain strict. Dedicated bar/capsule/ring/arc recognizers retain their previous tolerances.
+
 ## Plausible further adapters, not implemented
 
 | Family | What another adapter would need |

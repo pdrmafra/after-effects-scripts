@@ -5,6 +5,29 @@ function run(source) {
   return JSON.parse(JSON.stringify(vm.runInContext(source,c)));
 }
 function near(a,b){assert.ok(Math.abs(a-b)<1e-6,`${a} != ${b}`);}
+for(const delta of [0.49,0.5,-0.49,-0.5])test(`frame thickness residual within 5%: ${delta}`,()=>{
+  const m=run(`var f=PedroStrokeFixtures.polygonFrame([[-100,-50],[100,-50],[100,50],[-100,50]],10);PedroStrokeFixtures.translate(f.extraPath,[${delta},0]);PedroStrokeOutlines.frame([f.data,f.extraPath],1);`);
+  near(m.width,10);near(m.fitError,Math.abs(delta));
+});
+for(const delta of [0.51,-0.51])test(`frame thickness residual above 5% is rejected: ${delta}`,()=>{
+  assert.throws(()=>run(`var f=PedroStrokeFixtures.polygonFrame([[-100,-50],[100,-50],[100,50],[-100,50]],10);PedroStrokeFixtures.translate(f.extraPath,[${delta},0]);PedroStrokeOutlines.frame([f.data,f.extraPath],1);`));
+});
+test("manually deformed Diamond accepts its 2.6% end thickness residual",()=>{
+  const m=run(`var outer=PedroStrokeFixtures.straight([[0,-91.8774566650391],[155.275329589844,50.9209289550781],[57.9933166503906,142.798400878906],[-97.2820129394531,0]]),inner=PedroStrokeFixtures.straight([[-82.7179870605469,0],[57.9933013916016,129.043487548828],[140.711303710938,50.9209442138672],[0,-78.1225433349609]]);PedroStrokeOutlines.compound([outer,inner],1);`);
+  assert.equal(m.closed,true);assert.equal(m.vertices.length,4);
+  assert.ok(m.fitError>0.265 && m.fitError<0.267);assert.ok(m.fitError<=m.width*0.05);
+});
+for(const delta of [0.49,0.6])test(`connector width and perpendicular cap residual: ${delta}`,()=>{
+  const source=`var s=PedroStrokeFixtures.connector([[-85,-60],[85,-60],[85,60]],10);s.vertices[3][0]-=${delta};s.vertices[4][0]-=${delta};PedroStrokeOutlines.openBand(s);`;
+  if(delta<0.5){const m=run(source);near(m.width,10+delta);near(m.fitError,delta);}
+  else assert.throws(()=>run(source));
+});
+test("5% thickness tolerance does not relax segment angular correspondence",()=>{
+  assert.throws(()=>run(`var f=PedroStrokeFixtures.polygonFrame([[-100,-50],[100,-50],[100,50],[-100,50]],10);f.extraPath.vertices[1][1]+=0.4;PedroStrokeOutlines.frame([f.data,f.extraPath],1);`));
+});
+test("5% thickness tolerance does not relax concentric curved-corner matching",()=>{
+  assert.throws(()=>run(`var f=PedroStrokeFixtures.roundedFrame(200,100,30,12);PedroStrokeFixtures.translate(f.extraPath,[0.1,0]);PedroStrokeOutlines.frame([f.data,f.extraPath],1);`));
+});
 for(const count of [3,4,5,6,8,12])for(const width of [2,10,20])test(`uniform ${count}-gon frame, width ${width}`,()=>{
   const [m,points]=run(`var points=PedroStrokeFixtures.regular(${count},85),f=PedroStrokeFixtures.polygonFrame(points,${width});[PedroStrokeOutlines.compound([f.data,f.extraPath],1),points];`);
   near(m.width,width);assert.equal(m.closed,true);assert.equal(m.join,1);assert.ok(m.miterLimit>=4);assert.equal(m.vertices.length,count);

@@ -1,4 +1,4 @@
-// Pure ES3: matched uniform offsets. Reject ambiguity, overlaps and changing width.
+// Pure ES3: matched near-uniform offsets. Allow 5% thickness residuals, not invalid topology.
 var PedroStrokeOutlines = (function () {
     var EPS=0.000001;
     function fail(m){throw new Error(m);}
@@ -92,15 +92,16 @@ var PedroStrokeOutlines = (function () {
             if(x.line!==y.line || dot(x.axis,y.axis)<0.999999)fail("Boundary segments do not correspond.");
             var signed=cross(x.axis,sub(b.vertices[i],a.vertices[i]))*orientation;
             if(!i){width=signed;if(width<=EPS || !isFinite(width))fail("Invalid uniform offset width.");}
-            var tol=Math.max(0.005,width*0.0005);
+            var tol=Math.max(0.005,width*0.05),centerTol=Math.max(0.005,width*0.0005);
             error=Math.max(error,Math.abs(signed-width));if(Math.abs(signed-width)>tol)fail("Outline thickness changes.");
             if(x.line) {
                 var end=cross(x.axis,sub(b.vertices[j],a.vertices[j]))*orientation;
+                error=Math.max(error,Math.abs(end-width));
                 if(Math.abs(end-width)>tol)fail("Outline sides are not parallel uniform offsets.");
                 total+=length(sub(mul(add(a.vertices[j],b.vertices[j]),0.5),mul(add(a.vertices[i],b.vertices[i]),0.5)));
             } else {
                 var ca=x.circle,cb=y.circle;
-                if(length(sub(ca.center,cb.center))>tol || Math.abs(ca.sweep-cb.sweep)>0.00001 || Math.abs(Math.abs(ca.radius-cb.radius)-width)>tol || dot(unit(sub(a.vertices[i],ca.center)),unit(sub(b.vertices[i],cb.center)))<0.999999)fail("Curved boundaries are not concentric uniform offsets.");
+                if(length(sub(ca.center,cb.center))>centerTol || Math.abs(ca.sweep-cb.sweep)>0.00001 || Math.abs(Math.abs(ca.radius-cb.radius)-width)>tol || dot(unit(sub(a.vertices[i],ca.center)),unit(sub(b.vertices[i],cb.center)))<0.999999)fail("Curved boundaries are not concentric uniform offsets.");
                 total+=Math.abs(ca.sweep)*(ca.radius+cb.radius)/2;error=Math.max(error,ca.error,cb.error);
             }
         }
@@ -157,7 +158,7 @@ var PedroStrokeOutlines = (function () {
                 var m=match(a,b,da,db,orient,"angular open connector / butt caps / miter joins");
                 for(var side=0;side<2;side++) {
                     var index=side ? a.vertices.length-1 : 0,edge=side ? da.length-1 : 0,v=sub(b.vertices[index],a.vertices[index]);
-                    if(Math.abs(dot(v,da[edge].axis))>Math.max(0.005,m.width*0.0005) || Math.abs(length(v)-m.width)>Math.max(0.005,m.width*0.0005))fail("Connector ends must be perpendicular butt caps.");
+                    if(Math.abs(dot(v,da[edge].axis))>Math.max(0.005,m.width*0.0005) || Math.abs(length(v)-m.width)>Math.max(0.005,m.width*0.05))fail("Connector ends must be perpendicular butt caps.");
                 }
                 if(found)fail("Ambiguous connector centerline.");found=m;
             } catch(e) {if(e.toString().indexOf("Ambiguous connector")>=0)throw e;}

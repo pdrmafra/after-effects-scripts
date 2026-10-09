@@ -6,13 +6,14 @@ The core/depth evidence below refers to `0.1.0-beta.1`. The current `main` addit
 
 ## Shape to Stroke 0.0.5 — 2026-10-09
 
-- **208 Node tests:** conservative geometric recognition, uniform polygon/rounded offsets, normalized handles/vertices, circle/arc fitting, winding/fill rules, bounds/topology, cyclic starts/reversal, compact dialog/preferences and mocked recovery/write-verification faults.
-- **129 native scenarios:** AE 26.5x89 on macOS 27.0.1, all 73 synthetic catalog shapes, both original actions, mixed-batch Delete, reverse/animated Trim, corner/cap settings, parenting rejection and isolated preference save/read with cleanup. Temporary native fixtures were removed; user options and existing comps were not modified or saved. Separate approved READY/SKIP manual demo comps were left for testing.
-- **39 full-reveal render pairs:** identical silhouette bounds; normalized alpha differences below 0.6% of painted area, not pixel identity. **35 draw-on samples** were empty at 0% and increased in coverage.
+- **219 Node tests:** geometric recognition, polygon/rounded offsets, normalized handles/vertices, circle/arc fitting, winding/fill rules, bounds/topology, cyclic starts/reversal, compact dialog/preferences and mocked recovery/write-verification faults. Eleven additional tests cover the 5% thickness allowance, exact frame threshold, over-limit rejection, deformed Diamond, connector caps and unchanged angular/concentric checks.
+- **Read-only native 5% check:** the manually deformed Diamond in the open AE project was accepted with width 10.12445, residual 0.26584 and tolerance 0.50622 local units. No layers, preferences, selection or project files were changed. Visual comparison of this approximate conversion is still pending.
+- **129 earlier native scenarios (before the 5% adjustment):** AE 26.5x89 on macOS 27.0.1, all 73 synthetic catalog shapes, both original actions, mixed-batch Delete, reverse/animated Trim, corner/cap settings, parenting rejection and isolated preference save/read with cleanup. Temporary native fixtures were removed; user options and existing comps were not modified or saved. Separate approved READY/SKIP manual demo comps were left for testing.
+- **39 earlier full-reveal render pairs (before the 5% adjustment):** identical silhouette bounds; normalized alpha differences below 0.6% of painted area, not pixel identity. **35 draw-on samples** were empty at 0% and increased in coverage. These render results do not establish the visual error of newly accepted near-uniform artwork.
 - Manual preference persistence across an AE restart, manual Undo/Redo, real Figma/Illustrator samples, Windows and older AE remain unverified. Synthetic fixtures are not exporter compatibility evidence.
 - [Tool guide](../experimental/shape-to-stroke/README.md) and [applicability map](../experimental/shape-to-stroke/CAPABILITIES.md).
 
-Root build/check and CI now include the experimental tool: **240 Node tests** in total. Native tests remain permissioned/manual; CI never launches After Effects or downloads model weights.
+Root build/check and CI include the experimental tool: **251 Node tests** in total, passed locally after the 5% adjustment. Native tests remain permissioned/manual; CI never launches After Effects or downloads model weights.
 
 ## Automated checks
 
