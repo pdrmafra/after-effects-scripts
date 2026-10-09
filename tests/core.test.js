@@ -58,3 +58,42 @@ test("HOLD-only text keys preserve zero ease influence without constructing inva
 test("spatial APIs follow value type rather than AE's unreliable isSpatial flag",()=>{
   assert.deepEqual(evaluate(`var p=makeProperty([0,1],[10,20],[1,2]); p.isSpatial=true; p.keyInSpatialTangent=function(){throw new Error("should not be called");}; PedroAE.space(fixture([p]),12,false,false); p.keyTime(2);`),0.5);
 });
+// Spatial Stepped samples: the bounding keys' long handles must not loop around close samples.
+const curvedPath=`var P=[[0,0],[0,-100],[100,-100],[100,0]];
+function bez(u){var v=1-u,r=[];for(var d=0;d<2;d++)r.push(v*v*v*P[0][d]+3*v*v*u*P[1][d]+3*v*u*u*P[2][d]+u*u*u*P[3][d]);return r;}
+var p=makeProperty([0,1],[[0,0],[100,0]],[1,2],true);p.keys[0].outTangent=[0,-100];p.keys[1].inTangent=[0,-100];`;
+function bezierAt(c,u){const v=1-u;return [0,1].map(d=>v*v*v*c[0][d]+3*v*v*u*c[1][d]+3*v*u*u*c[2][d]+u*u*u*c[3][d]);}
+function original(u){return bezierAt([[0,0],[0,-100],[100,-100],[100,0]],u);}
+function assertPathKept(keys,uOf){
+  for(let i=0;i<keys.length-1;i++){
+    const a=keys[i],b=keys[i+1],c=[a.value,[a.value[0]+a.outTangent[0],a.value[1]+a.outTangent[1]],[b.value[0]+b.inTangent[0],b.value[1]+b.inTangent[1]],b.value];
+    for(const s of [0.25,0.5,0.75]){
+      const got=bezierAt(c,s),want=original(uOf(a.time)+s*(uOf(b.time)-uOf(a.time)));
+      assert.ok(Math.hypot(got[0]-want[0],got[1]-want[1])<1e-6,`segment ${i} at ${s}: ${got} != ${want}`);
+    }
+  }
+}
+for(const [label,uOf,source] of [["linear timing",t=>t,"bez(t)"],["eased timing",t=>t*t,"bez(t*t)"]])test(`stepped spatial samples keep a curved motion path: ${label}`,()=>{
+  const keys=evaluate(`${curvedPath}p.valueAtTime=function(t){return ${source};};PedroAE.step(fixture([p]),6,false);p.keys;`);
+  assert.equal(keys.length,5);
+  near2(keys[0].outTangent,[0,-100*uOf(0.25)]);near2(keys[4].inTangent,[0,-100*(1-uOf(0.75))]);
+  assert.ok(keys.slice(1,4).every(k=>k.spatialContinuous && !("sample" in k)));
+  assertPathKept(keys,uOf);
+});
+function near2(a,b){assert.ok(Math.hypot(a[0]-b[0],a[1]-b[1])<1e-6,`${a} != ${b}`);}
+test("stepped Hold mode leaves spatial handles untouched",()=>{
+  const keys=evaluate(`${curvedPath}p.valueAtTime=function(t){return bez(t);};PedroAE.step(fixture([p]),6,true);p.keys;`);
+  near2(keys[0].outTangent,[0,-100]);near2(keys[4].inTangent,[0,-100]);assert.ok(keys.slice(1,4).every(k=>k.inTangent[0]===0 && k.outTangent[1]===0));
+});
+test("samples that are not on the spatial curve keep the previous straight-handle behavior",()=>{
+  const keys=evaluate(`${curvedPath}p.valueAtTime=function(t){return [t*1000,500];};PedroAE.step(fixture([p]),6,false);p.keys;`);
+  near2(keys[0].outTangent,[0,-100]);near2(keys[4].inTangent,[0,-100]);assert.ok(keys.slice(1,4).every(k=>!k.spatialContinuous));
+});
+test("an unselected key inside the range splits the spatial curve into its own segments",()=>{
+  const keys=evaluate(`var p=makeProperty([0,0.5,1],[[0,0],[50,-75],[100,0]],[1,3],true);p.keys[0].outTangent=[0,-50];p.keys[1].inTangent=[-25,0];p.keys[1].outTangent=[25,0];p.keys[2].inTangent=[0,-50];
+var segs=[[[0,0],[0,-50],[25,-75],[50,-75]],[[50,-75],[75,-75],[100,-50],[100,0]]];
+function at(c,u){var v=1-u,r=[];for(var d=0;d<2;d++)r.push(v*v*v*c[0][d]+3*v*v*u*c[1][d]+3*v*u*u*c[2][d]+u*u*u*c[3][d]);return r;}
+p.valueAtTime=function(t){return t<0.5 ? at(segs[0],t*2) : at(segs[1],t*2-1);};PedroAE.step(fixture([p]),6,false);p.keys;`);
+  assert.deepEqual(keys.map(k=>k.time),[0,0.25,0.5,0.75,1]);
+  near2(keys[0].outTangent,[0,-25]);near2(keys[2].inTangent,[-12.5,0]);near2(keys[2].outTangent,[12.5,0]);near2(keys[4].inTangent,[0,-25]);
+});

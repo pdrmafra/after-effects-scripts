@@ -331,7 +331,8 @@
         win.spacing = 10;
         win.margins = 16;
 
-        win.add("statictext", undefined, "Experimental — local inference; no models bundled. Output files are not removed by Undo.");
+        var notice = win.add("statictext", undefined, "Experimental — local inference; no models bundled. Output files are not removed by Undo.\nWhile a depth map is generating, After Effects stops responding until it finishes; there is no cancel. Start with a short work area.", { multiline: true });
+        notice.preferredSize = [360, 64];
         selectedText = win.add("statictext", undefined, "");
         selectedText.preferredSize.width = 360;
 
@@ -514,7 +515,7 @@
             if (!chooseOutputFolder()) return;
             app.beginUndoGroup("Generate Static Depth Map");
             try {
-                statusText.text = "Generating...";
+                statusText.text = "Generating... After Effects will not respond until this finishes.";
                 win.update();
                 outputFile = generateDepth(inputFile, options);
                 importDepthMap(outputFile, guideLayerCheckbox.value);
@@ -565,7 +566,7 @@
                 appendLog(folders.log, "Starting sequence for comp: " + comp.name);
                 appendLog(folders.log, "Work area start: " + String(comp.workAreaStart) + ", duration: " + String(comp.workAreaDuration) + ", frame duration: " + String(comp.frameDuration));
                 exportResult = exportWorkAreaFrames(comp, folders.source, statusText, win, folders.log);
-                statusText.text = "Generating depth sequence...";
+                statusText.text = "Generating depth sequence... After Effects will not respond until this finishes.";
                 win.update();
                 firstDepthFrame = generateDepthSequence(folders.source, folders.depth, options, 1 / comp.frameDuration, folders.log, exportResult.frameCount);
                 appendLog(folders.log, "Importing first depth frame: " + firstDepthFrame.fsName);

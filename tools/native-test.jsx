@@ -53,6 +53,20 @@
             assert(p.keyValue(p.nearestKeyIndex(0.5))===99,"existing key overwritten");
             assert(near(p.keyTime(p.numKeys),2),"last selected interval lost");
         });
+        test("step keeps a hand-curved Position path (no handle loops)", function () {
+            var c=fresh(), layer=c.layers.addShape(), p=prop(layer,"ADBE Position");
+            animated(p,[0,1],[[100,300],[500,300]]);
+            var dims=p.keyValue(1).length;
+            function vec(x,y){var v=[x,y];while(v.length<dims)v.push(0);return v;}
+            p.setSpatialAutoBezierAtKey(1,false);p.setSpatialAutoBezierAtKey(2,false);p.setSpatialContinuousAtKey(1,false);p.setSpatialContinuousAtKey(2,false);
+            p.setSpatialTangentsAtKey(1,vec(0,0),vec(0,-300));p.setSpatialTangentsAtKey(2,vec(0,-300),vec(0,0));
+            var curve=[], i, t;
+            for (i=0;i<=2000;i++) curve.push(p.valueAtTime(i/2000,true));
+            function offCurve(v){var best=Infinity;for(var j=0;j<curve.length;j++){var dx=v[0]-curve[j][0],dy=v[1]-curve[j][1];best=Math.min(best,Math.sqrt(dx*dx+dy*dy));}return best;}
+            choose(p,[1,2]); PedroAE.step(c,4,false);
+            assert(p.numKeys===7,"expected 5 samples, got "+(p.numKeys-2));
+            for (t=0;t<=1;t+=1/96) assert(offCurve(p.valueAtTime(t,true))<0.5,"motion path left the original curve at "+t);
+        });
         test("hold mode leaves last endpoint / outside keys unchanged", function () {
             var c=fresh(), layer=c.layers.addShape(), p=prop(layer,"ADBE Rotate Z");
             animated(p,[0,1,2,3],[0,10,20,30]); choose(p,[2,3]); PedroAE.step(c,12,true);

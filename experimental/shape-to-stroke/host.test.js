@@ -29,7 +29,7 @@ Comp.prototype.layer=function(i){return this.layers[i-1];};
 function Layer(comp,name){this.comp=comp;this.containingComp=comp;this.name=name;this.sourceName=name;this.matchName="ADBE Vector Layer";this.propertyType=2;this.locked=false;this.enabled=true;this.selected=true;this.blendingMode=1;this.inPoint=0;this.outPoint=4;this.root=new G("layer",this);this.root.push(new G("ADBE Root Vectors Group",this));this.root.push(new G("ADBE Effect Parade",this));this.root.push(new G("ADBE Mask Parade",this));comp.layers.push(this);}
 Object.defineProperty(Layer.prototype,"numProperties",{get:function(){return this.root.numProperties;}});
 Layer.prototype.property=function(n){return this.root.property(n);};
-Layer.prototype.duplicate=function(){var copy=new Layer(this.comp,this.name+" copy");copy.sourceName=this.name;copy.root=cloneGroup(this.root,copy);this.selected=false;return copy;};
+Layer.prototype.duplicate=function(){var copy=new Layer(this.comp,this.name+" copy");copy.sourceName=this.name;copy.comment=this.comment;copy.root=cloneGroup(this.root,copy);this.selected=false;return copy;};
 Layer.prototype.remove=function(){if(this.comp.failRemove===this.name)throw new Error("injected removal failure");this.comp.layers.splice(this.comp.layers.indexOf(this),1);};
 function source(c,name){var l=new Layer(c,name);var root=l.property("ADBE Root Vectors Group");root.addProperty("ADBE Vector Shape - Rect");root.addProperty("ADBE Vector Graphic - Fill");return l;}
 function curvedSource(c,name,ring,rule){var l=new Layer(c,name),root=l.property("ADBE Root Vectors Group");var a=root.addProperty("ADBE Vector Shape - Group");a.property("ADBE Vector Shape").setValue(ring ? PedroStrokeFixtures.ellipse(160,160) : PedroStrokeFixtures.band(85,55,0,Math.PI));if(ring){var b=root.addProperty("ADBE Vector Shape - Group");b.property("ADBE Vector Shape").setValue(rule===2 ? PedroStrokeFixtures.ellipse(110,110) : PedroStrokeFixtures.reverse(PedroStrokeFixtures.ellipse(110,110)));}root.addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Rule").setValue(rule || 1);return l;}
@@ -93,4 +93,7 @@ test("miter write failure restores both sources and never deletes originals",()=
 });
 test("clamped corner settings trigger verification rollback before original deletion",()=>{
   const run=setup();assert.deepEqual(run(`var c=new Comp(),a=outlineSource(c,"A","frame"),setter=P.prototype.setValue;P.prototype.setValue=function(v){setter.call(this,this.matchName==="ADBE Vector Stroke Miter Limit" ? 1 : v);};var error="";try{PedroStrokeHost.create(c,[a],{originalAction:"delete"});}catch(e){error=e.toString();}[error.indexOf("corner join verification")>=0,c.numLayers,a.enabled,a.selected,app.groups]`),[true,1,true,true,0]);
+});
+test("the original layer comment is kept on the replacement, with the tool note appended",()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A"),b=source(c,"B");a.comment="Client note";var copies=PedroStrokeHost.create(c,[a,b],{});[copies[0].comment.split("\\n")[0],copies[0].comment.split("\\n")[1].indexOf("Shape to Stroke")===0,copies[1].comment.indexOf("Shape to Stroke")===0,a.comment]`),["Client note",true,true,"Client note"]);
 });

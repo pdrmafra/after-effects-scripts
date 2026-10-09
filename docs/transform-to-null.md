@@ -1,19 +1,32 @@
 # Transform to Null
 
-Select **exactly one unlocked visual layer** in the active comp, then run `Transform-to-Null.jsx`.
+Moves a layer's position, scale and rotation animation onto a new parent null. The layer itself goes back to neutral values, so you can add a second, independent layer of motion on top without touching the original animation.
 
-The script creates `CTRL_<layer name>` immediately above the source and selects only the controller. The controller inherits the source's 2D/3D mode, timing, label color and former parent. Name collisions receive a numeric suffix.
+![A layer's Position animation moves to a new parent null; the layer then gets its own motion on top](media/transform-to-null.gif)
 
-Transferred controls: Position (including separated dimensions), Scale, Z Rotation, and 3D Orientation/X/Y Rotation when present. Key times, values, interpolation, temporal ease, spatial tangents, continuity, auto-Bezier, roving and labels are copied. Every transferred channel is verified before the source is reparented/reset.
+## How to use
 
-The controller's Anchor Point is zero. The source retains its own Anchor Point animation and Opacity; its Position/Rotation become zero and Scale becomes 100. This allows a second layer of local adjustments without moving the existing animation into expressions.
+1. Save your project.
+2. Select **exactly one** unlocked layer (footage, solid, precomp, shape or text).
+3. Run **`Transform-to-Null.jsx`**.
 
-## Limits
+A null named `CTRL_<layer name>` appears right above the layer and is selected. It now carries the animation; the layer is parented to it. One Cmd/Ctrl+Z undoes everything.
 
-- No cameras, lights, locked layers, Auto-Orient or collapsed precomps/continuously rasterized footage. Native shape and text layers are allowed.
-- Expressions anywhere on the source layer are rejected, including disabled expressions. Moving a layer into a new hierarchy can change expression context.
-- Expressions on other layers that reference the source's local transforms are not detected or rewritten. Layer-index expressions elsewhere can also be affected by inserting a null.
-- The script does not preserve the visual result of effects that depend on local transform values, hierarchy or render order. Test effect-heavy layers on a project copy.
-- This is a hierarchy transfer, not an animation bake. It does not transfer Opacity, masks, shape-group transforms, effects or time remapping.
+## What moves where
 
-Use Undo to remove the controller and restore the source. In a caught failure, the script attempts its own rollback and removes only newly created unused null footage; an incomplete recovery explicitly asks you to Undo.
+- **To the null:** Position (including separated dimensions), Scale, Z Rotation and, on 3D layers, Orientation and X/Y Rotation. Keyframe times, values, easing, motion-path handles, roving and labels are copied exactly and checked before the layer is changed.
+- **Stays on the layer:** Anchor Point (and its animation) and Opacity. Position and Rotation become 0, Scale becomes 100.
+- **The null** gets the layer's 2D/3D mode, timing, label color and former parent, with its anchor at zero. If the name already exists, a number is added.
+
+This is a change of hierarchy, not a bake: masks, effects, shape-group transforms and time remapping are not moved.
+
+## Not supported
+
+- Cameras, lights, locked layers, Auto-Orient, collapsed precomps and continuously rasterized footage (native shape and text layers are fine).
+- Layers with expressions anywhere, even disabled ones: moving a layer into a new hierarchy can change what an expression computes.
+
+## Good to know
+
+- Expressions on **other** layers that read this layer's transforms are not detected or rewritten, and inserting the null shifts layer indices that expressions may use.
+- Effects whose look depends on the layer's own transform values, hierarchy or render order may change. Try effect-heavy layers on a copy first.
+- If something fails midway, the script tries to restore the layer and removes only the null it created. If it says recovery is incomplete, press Undo right away.

@@ -1,6 +1,6 @@
 # Shape to Stroke: applicability map
 
-The useful question is not the shape's name, but whether its filled boundary describes **one unambiguous, non-overlapping stroke of constant width**. There are infinitely many drawings; this map covers geometric families, not every possible outline. Version 0.0.5 is a bounded recognizer, not a universal vector skeletonizer.
+The useful question is not the shape's name, but whether its filled boundary describes **one unambiguous, non-overlapping stroke of constant width**. There are infinitely many drawings; this map covers geometric families, not every possible outline. This version is a bounded recognizer, not a universal vector skeletonizer.
 
 ## Implemented families
 

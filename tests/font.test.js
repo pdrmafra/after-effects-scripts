@@ -29,3 +29,16 @@ test("partial character-range failures are not presented as a complete inventory
 test("cyclic precomp references terminate safely",()=>{
   assert.deepEqual(evaluate(`var c=new CompItem(); c.id=1;c.name="Cycle";c.numLayers=1;c.layer=function(){return {index:1,name:"Recursive",source:c,property:function(){return null;}};};var s=stats();fontTest.inspectComp(c,c.name,{}, {}, [],s); [s.compsInspected,s.skippedCycles,s.errors.length];`),[1,1,1]);
 });
+test("a precomp used several times is read once but reported for every instance",()=>{
+  const result=evaluate(`var calls=0;var td={text:"AB",characterRange:function(a,b){calls++;return {font:a?"Font-B":"Font-A",text:this.text.slice(a,b)};}};
+var pre=new CompItem();pre.id=2;pre.name="Title";pre.time=0;pre.numLayers=1;
+var textLayer={index:1,name:"Headline",containingComp:pre,property:function(n){return n==="ADBE Text Properties" ? {property:function(){return {numKeys:0,value:td,expressionEnabled:false};}} : null;}};
+pre.layer=function(){return textLayer;};
+var main=new CompItem();main.id=1;main.name="Main";main.numLayers=3;
+main.layer=function(i){return {index:i,name:"Title "+i,source:pre,property:function(){return null;}};};
+var map={},order=[],s=stats();fontTest.inspectComp(main,main.name,{},map,order,s);
+[calls,s.textLayers,map["$Font-A"].occurrences.map(function(o){return o.compPath;}),map["$Font-B"].occurrences.length];`);
+  assert.equal(result[0],2);assert.equal(result[1],3);
+  assert.deepEqual(result[2],["Main > Layer 1 - Title 1 > Title","Main > Layer 2 - Title 2 > Title","Main > Layer 3 - Title 3 > Title"]);
+  assert.equal(result[3],3);
+});

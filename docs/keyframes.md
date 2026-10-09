@@ -1,27 +1,45 @@
 # Keyframe tools
 
-Select properties and keys in the active composition. Intervals are positive whole numbers of **composition frames**, using the actual frame duration (including fractional frame rates).
-
-Numeric, color, 2D/3D Position, path and Source Text properties are accepted. Custom-value properties and markers are not. Roving keys, temporal auto-Bezier/continuous keys, locked layers and expressions on processed properties are rejected before edits. Manual temporal ease, spatial tangents, interpolation, selection and labels are retained for existing keys unless Hold mode explicitly changes interpolation.
+Both tools work on keyframes you select in the active comp. Intervals are whole **comp frames**, using the comp's real frame duration (fractional frame rates such as 29.97 included).
 
 ## Spacing Keyframes
 
-1. Select the keys to move.
-2. Enter spacing in frames.
-3. Choose whether to start at the first chosen key or the current-time indicator.
-4. Leave **Move ALL keys** unchecked for selected keys only. Check it to match the older script's behavior of moving every key in the selected properties.
+Spaces keyframes an exact number of frames apart.
 
-Spacing is calculated independently for each property. Unselected keys keep their times and values. If a moved key would land on an unselected key, the entire operation is cancelled, including other selected properties.
+1. Select the keyframes to move.
+2. Run **`Spacing-Keyframes.jsx`** and enter the spacing in frames.
+3. Optionally tick **Start at current time** (otherwise spacing starts at the first selected key).
+4. Leave **Move ALL keys** unticked to move only the selected keys; tick it to move every key in the selected properties.
+5. Click **Apply**.
 
-A single key can be moved with **Start at current time**. There is no automatic clipping to layer bounds: AE permits animation keys outside a layer's visible interval.
+Each property is spaced on its own. Unselected keys keep their time and value. If a moved key would land on an unselected key, the whole operation is cancelled, including the other properties. A single key can be moved to the current time. Keys are not clipped to the layer's in/out points; After Effects allows keys outside them.
 
 ## Stepped Keyframes
 
-Select two or more keys per property. Samples are inserted at the chosen interval between consecutive selected keys. With three selected keys, both intervals are processed using the original times, without index drift.
+Adds keys every few frames between selected keys, for a stepped or stop-motion feel.
 
-All values are sampled from the original pre-expression curve **before any property is changed**. Existing keys at sample times are not overwritten. Existing unselected keys inside the intervals remain.
+1. Select **two or more** keys on each property.
+2. Run **`Stepped-Keyframes.jsx`** and enter the interval in frames.
+3. Optionally tick **Hold between samples** for hard steps.
+4. Click **Apply**.
 
-- Default: add linear samples. This approximates the original curve at sample times; it does not guarantee identical interpolation between samples. Hold-only properties such as Source Text remain Hold-only.
-- **Hold between samples:** changes interpolation for keys inside the selected intervals to Hold, including existing unselected keys there. The final selected endpoint and keys outside the intervals retain their interpolation.
+New keys are placed between each pair of consecutive selected keys, with values taken from the original animation before anything changes. Existing keys are kept and never overwritten.
 
-Spatial samples use zero tangents. This is not an exact spatial-curve subdivision algorithm; use a project copy and check the motion. A single operation is limited to 10,000 new keys.
+- **Without Hold:** new keys are linear in time. On Position, the motion path is split at the new keys so it keeps the original curve, including handles you pulled by hand; the speed between samples is close to, not identical to, the original.
+- **With Hold:** every key inside the selected range becomes Hold, including unselected keys there. The last selected key and keys outside the range keep their interpolation.
+
+## Supported properties
+
+Numbers, colors, 2D/3D Position, mask and shape paths and Source Text. Not supported: custom-value properties and markers.
+
+## Refused before any change
+
+- Roving keys, temporal auto-Bezier or continuous keys: switch them off first.
+- Locked layers and properties with expressions.
+
+Easing, interpolation, selection and keyframe labels of existing keys are kept (unless Hold mode changes the interpolation). Motion-path handles are kept too, except that Stepped shortens the handles next to new samples so the path keeps its shape. One Cmd/Ctrl+Z undoes everything.
+
+## Good to know
+
+- Keys with auto-Bezier motion paths let After Effects recalculate their handles around the new keys, so the path may shift slightly near them. If a sample does not lie on the original curve (unexpected), that stretch keeps straight handles as in earlier versions.
+- One run adds at most 10,000 keys; use a larger interval for long ranges.
