@@ -108,7 +108,14 @@ var PedroStrokeGeometry = (function () {
         if(Math.abs(Math.abs(area)/2-expected)>expected*0.005) fail("Capsule area/topology does not match.");
         return model(center,axis,span+width,width,2,"Bezier capsule (sampled fit)",error);
     }
-    function recognize(s) { s=normalize(s); return polygonRectangle(s) || capsule(s); }
+    function recognize(s) {
+        s=normalize(s);
+        var rect=polygonRectangle(s);if(rect)return rect;
+        try {return capsule(s);} catch(error) {
+            // Keep established rejection diagnostics unless a circular arc is recognized.
+            try {return PedroStrokeCircular.arc(s);} catch(arcError) {throw error;}
+        }
+    }
     // Synthetic fixtures: these are not evidence of Figma/Illustrator export compatibility.
     function fixture(width,height,rounded,angle,center) {
         var x=width/2,y=height/2,r=height/2,k=r*K, s;

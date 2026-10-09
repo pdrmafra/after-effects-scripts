@@ -19,7 +19,7 @@ if(n==="ADBE Vector Shape - Group")fields={"ADBE Vector Shape":null};
 else if(n==="ADBE Vector Graphic - Stroke")fields={"ADBE Vector Stroke Width":1,"ADBE Vector Stroke Color":[1,1,1,1],"ADBE Vector Stroke Opacity":100,"ADBE Vector Stroke Line Cap":1};
 else if(n==="ADBE Vector Filter - Trim")fields={"ADBE Vector Trim End":100};
 else if(n==="ADBE Vector Shape - Rect")fields={"ADBE Vector Rect Size":[200,20],"ADBE Vector Rect Position":[0,0],"ADBE Vector Rect Roundness":0};
-else if(n==="ADBE Vector Graphic - Fill")fields={"ADBE Vector Fill Color":[0.2,0.5,0.9,1],"ADBE Vector Fill Opacity":73};
+else if(n==="ADBE Vector Graphic - Fill")fields={"ADBE Vector Fill Color":[0.2,0.5,0.9,1],"ADBE Vector Fill Opacity":73,"ADBE Vector Fill Rule":1};
 if(fields)for(var key in fields)g.push(new P(key,fields[key],this.owner));return g;};
 function cloneGroup(g,owner){var out=new G(g.matchName,owner);for(var i=0;i<g.items.length;i++){var p=g.items[i];out.push(p.propertyType===2?cloneGroup(p,owner):new P(p.matchName,p.value,owner));}return out;}
 function Comp(){this.layers=[];this.time=0;this.duration=4;this.frameDuration=1/24;}
@@ -32,8 +32,9 @@ Layer.prototype.property=function(n){return this.root.property(n);};
 Layer.prototype.duplicate=function(){var copy=new Layer(this.comp,this.name+" copy");copy.sourceName=this.name;copy.root=cloneGroup(this.root,copy);this.selected=false;return copy;};
 Layer.prototype.remove=function(){if(this.comp.failRemove===this.name)throw new Error("injected removal failure");this.comp.layers.splice(this.comp.layers.indexOf(this),1);};
 function source(c,name){var l=new Layer(c,name);var root=l.property("ADBE Root Vectors Group");root.addProperty("ADBE Vector Shape - Rect");root.addProperty("ADBE Vector Graphic - Fill");return l;}
+function curvedSource(c,name,ring,rule){var l=new Layer(c,name),root=l.property("ADBE Root Vectors Group");var a=root.addProperty("ADBE Vector Shape - Group");a.property("ADBE Vector Shape").setValue(ring ? PedroStrokeFixtures.ellipse(160,160) : PedroStrokeFixtures.band(85,55,0,Math.PI));if(ring){var b=root.addProperty("ADBE Vector Shape - Group");b.property("ADBE Vector Shape").setValue(rule===2 ? PedroStrokeFixtures.ellipse(110,110) : PedroStrokeFixtures.reverse(PedroStrokeFixtures.ellipse(110,110)));}root.addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Rule").setValue(rule || 1);return l;}
 `,c);
-  for(const f of ["geometry.jsxinc","host.jsxinc"])vm.runInContext(fs.readFileSync(__dirname+"/"+f,"utf8"),c);
+  for(const f of ["circular.jsxinc","geometry.jsxinc","host.jsxinc","fixtures.jsxinc"])vm.runInContext(fs.readFileSync(__dirname+"/"+f,"utf8"),c);
   return source=>JSON.parse(JSON.stringify(vm.runInContext(source,c)));
 }
 test("analysis leaves all source state untouched",()=>{
@@ -70,4 +71,13 @@ test("cross-comp and duplicate requests are rejected before mutation",()=>{
   for(const request of ["[a,a]","[a,b]"]) {
     const run=setup();assert.deepEqual(run(`var c=new Comp(),other=new Comp(),a=source(c,"A"),b=source(other,"B");var error=false;try{PedroStrokeHost.create(c,${request},{});}catch(e){error=true;}[error,c.numLayers,other.numLayers,app.groups]`),[true,1,1,0]);
   }
+});
+for(const ring of [true,false])for(const action of ["disable","delete"])test(`curved host write / reverse / ${action}: ${ring ? "ring" : "arc"}`,()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=curvedSource(c,"A",${ring},1),g=PedroStrokeHost.snapshot(a).geometry;var copy=PedroStrokeHost.create(c,[a],{reverse:true,originalAction:"${action}"})[0],s=copy.property("ADBE Root Vectors Group").property(1).property("ADBE Vector Shape").value;[c.numLayers,s.closed,s.vertices.length,s.inTangents.length,s.outTangents[0][0]===PedroStrokeCircular.path(g,true).outTangents[0][0],app.groups]`),[action==="delete" ? 1 : 2,ring,ring ? 4 : 3,ring ? 4 : 3,true,0]);
+});
+test("same-winding non-zero disk blocks a mixed batch; even-odd ring is supported",()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"Good"),b=curvedSource(c,"Ring",true,2),root=b.property("ADBE Root Vectors Group");root.property(3).property("ADBE Vector Fill Rule").setValue(1);var error="";try{PedroStrokeHost.create(c,[a,b],{originalAction:"delete"});}catch(e){error=e.toString();}var n=c.numLayers;root.property(3).property("ADBE Vector Fill Rule").setValue(2);PedroStrokeHost.create(c,[b],{});[error.indexOf("filled disk")>=0,n,c.numLayers,a.enabled,b.enabled,app.groups]`),[true,2,3,true,false,0]);
+});
+test("missing compound fill rule refuses conversion without mutation",()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=curvedSource(c,"Ring",true,1);a.property("ADBE Root Vectors Group").property(3).property("ADBE Vector Fill Rule").remove();var error=false;try{PedroStrokeHost.create(c,[a],{});}catch(e){error=true;}[error,c.numLayers,a.enabled,app.groups]`),[true,1,true,0]);
 });

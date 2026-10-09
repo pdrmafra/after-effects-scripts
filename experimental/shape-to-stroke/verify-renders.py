@@ -5,6 +5,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent
 NAMES = ["native-rectangle", "native-capsule", "bezier-rectangle", "bezier-capsule", "nested-scaled-capsule"]
+NAMES += ["circular-ring", "even-odd-ring", "thin-ring", "quarter-arc", "three-quarter-arc", "oblique-arc", "nested-mirrored-arc"]
 
 
 def read(name):
@@ -44,17 +45,18 @@ for name in NAMES:
     diff[:, :, 3] = 1
     rows.append(np.concatenate([tile(before, name + " / fill"), tile(after, "recovered stroke"), tile(diff, "alpha diff x20")], axis=1))
 
-motion = [read(f"motion-{i}.png") for i in range(5)]
-coverage = [float(frame[:, :, 3].sum()) for frame in motion]
-print("Draw-on alpha coverage:", coverage)
-if coverage[0] > 0.001 or not all(a < b for a, b in zip(coverage, coverage[1:])):
-    raise AssertionError("Draw-on is not empty at 0% / monotonic across sampled frames")
-strip = np.zeros((145, 720, 3), dtype=np.uint8)
-for i, frame in enumerate(motion):
-    painted = frame[:, :, :3] * frame[:, :, 3:4]
-    strip[35:, i * 144:(i + 1) * 144] = cv2.resize(np.clip(painted * 255, 0, 255).astype(np.uint8), (144, 110))
-    cv2.putText(strip, f"{i * 25}%", (i * 144 + 5, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 220, 220), 1)
-rows.append(strip)
+for prefix in ["motion-", "motion-ring-", "motion-arc-"]:
+    motion = [read(f"{prefix}{i}.png") for i in range(5)]
+    coverage = [float(frame[:, :, 3].sum()) for frame in motion]
+    print(prefix + " alpha coverage:", coverage)
+    if coverage[0] > 0.001 or not all(a < b for a, b in zip(coverage, coverage[1:])):
+        raise AssertionError("Draw-on is not empty at 0% / monotonic across sampled frames")
+    strip = np.zeros((145, 720, 3), dtype=np.uint8)
+    for i, frame in enumerate(motion):
+        painted = frame[:, :, :3] * frame[:, :, 3:4]
+        strip[35:, i * 144:(i + 1) * 144] = cv2.resize(np.clip(painted * 255, 0, 255).astype(np.uint8), (144, 110))
+        cv2.putText(strip, f"{prefix}{i * 25}%", (i * 144 + 5, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (220, 220, 220), 1)
+    rows.append(strip)
 if not cv2.imwrite(str(ROOT / "comparison-sheet.png"), np.concatenate(rows, axis=0)):
     raise IOError("Cannot write QA sheet")
-print("PASS: five rendered pairs and five draw-on samples. Antialiasing is not pixel-identical.")
+print("PASS: twelve rendered pairs and fifteen draw-on samples. Antialiasing is not pixel-identical.")

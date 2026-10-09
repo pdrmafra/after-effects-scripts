@@ -1,5 +1,6 @@
 // Creates and removes only its own synthetic comps. Run only with tool approval.
 (function () {
+    #include "circular.jsxinc"
     #include "geometry.jsxinc"
     #include "host.jsxinc"
     #include "settings.jsxinc"
@@ -34,6 +35,32 @@
             f.layer.enabled=false;
             c.saveFrameToPng(0,new File(outputDir.fsName+"/"+row[0]+"-after.png"));
         });})(cases[ci]);
+        var curveRows=[["circular-ring","Ring compound path"],["even-odd-ring","Even-odd same-winding ring"],
+            ["thin-ring","Thin 2-unit ring"],["quarter-arc","Quarter arc band"],["three-quarter-arc","Three-quarter arc"],
+            ["oblique-arc","Reversed oblique arc"],["nested-mirrored-arc","Nested mirrored half arc"]];
+        function entryNamed(name) {var entries=PedroStrokeFixtures.catalog();for(var i=0;i<entries.length;i++)if(entries[i].name===name)return entries[i];throw new Error("Missing fixture: "+name);}
+        for(ci=0;ci<curveRows.length;ci++)(function(row){test(row[0]+" curved geometry / style / render pair",function(){
+            var c=fresh(),f=PedroStrokeFixtures.fromCase(c,entryNamed(row[1])),g=PedroStrokeHost.snapshot(f.layer).geometry;
+            f.layer.property("ADBE Transform Group").property("ADBE Position").setValue([240,180]);
+            c.saveFrameToPng(0,new File(outputDir.fsName+"/"+row[0]+"-before.png"));
+            var copy=PedroStrokeHost.create(c,[f.layer],{})[0],out=PedroStrokeHost.contentsAt(copy,f.chain),s=out.property(1).property("ADBE Vector Shape").value;
+            assert(s.closed===!!g.closed && s.vertices.length===g.vertices.length,"Wrong curved topology");
+            assert(near(out.property(2).property("ADBE Vector Stroke Width").value,g.width),"Wrong circular thickness");
+            assert(near(out.property(2).property("ADBE Vector Stroke Opacity").value,73),"Curved opacity lost");
+            assert(!f.layer.enabled && copy.selected,"Wrong conversion state");
+            c.saveFrameToPng(0,new File(outputDir.fsName+"/"+row[0]+"-after.png"));
+        });})(curveRows[ci]);
+        for(var curvedType=0;curvedType<2;curvedType++)(function(isRing){test((isRing ? "ring" : "arc")+" reverse handles / linear animated trim",function(){
+            var c=fresh(),f=PedroStrokeFixtures.fromCase(c,entryNamed(isRing ? "Ring compound path" : "Three-quarter arc"));
+            f.layer.property("ADBE Transform Group").property("ADBE Position").setValue([240,180]);c.time=0.5;
+            var expected=PedroStrokeCircular.path(PedroStrokeHost.snapshot(f.layer).geometry,true);
+            var copy=PedroStrokeHost.create(c,[f.layer],{reverse:true,animate:true,frames:12})[0];
+            var out=PedroStrokeHost.contentsAt(copy,f.chain),s=out.property(1).property("ADBE Vector Shape").value;
+            assert(s.closed===isRing && s.vertices.length===expected.vertices.length,"Wrong animated curve topology");
+            for(var vi=0;vi<s.vertices.length;vi++)for(var d=0;d<2;d++)assert(near(s.vertices[vi][d],expected.vertices[vi][d]) && near(s.inTangents[vi][d],expected.inTangents[vi][d]) && near(s.outTangents[vi][d],expected.outTangents[vi][d]),"Reverse point / handle mismatch");
+            var end=out.property(3).property("ADBE Vector Trim End");assert(end.numKeys===2 && near(end.valueAtTime(0.75,false),50),"Curved trim motion mismatch");
+            for(var fi=0;fi<5;fi++)c.saveFrameToPng(0.5+fi*0.125,new File(outputDir.fsName+"/motion-"+(isRing ? "ring" : "arc")+"-"+fi+".png"));
+        });})(curvedType===0);
         test("reverse / draw-on / keep disabled",function(){
             var c=fresh(),f=PedroStrokeFixtures.source(c,"Source",false,true,0,false);c.time=0.5;
             var model=PedroStrokeHost.snapshot(f.layer).geometry;
@@ -80,6 +107,16 @@
             rejects(function(){PedroStrokeHost.create(c,[f.layer],{originalAction:"delete"});});
             assert(c.numLayers===2 && f.layer.enabled && child.parent===f.layer,"Parent dependency mutated");
         });
+        test("mixed ring / arc Delete verifies both curved replacements before removing originals",function(){
+            var c=fresh(),a=PedroStrokeFixtures.fromCase(c,entryNamed("Ring compound path")),b=PedroStrokeFixtures.fromCase(c,entryNamed("Three-quarter arc"));
+            var ids=[a.layer.id,b.layer.id],chains=[a.chain,b.chain],copies=PedroStrokeHost.create(c,[a.layer,b.layer],{originalAction:"delete",reverse:true});
+            assert(c.numLayers===2 && copies.length===2,"Wrong curved replacement count");
+            for(var i=0;i<2;i++) {
+                assert(copies[i].id!==ids[0] && copies[i].id!==ids[1] && copies[i].selected,"Curved original not deleted");
+                var s=PedroStrokeHost.contentsAt(copies[i],chains[i]).property(1).property("ADBE Vector Shape").value;
+                assert(s.closed===(i===0) && s.vertices.length===4,"Wrong curved Delete geometry");
+            }
+        });
         var entries=PedroStrokeFixtures.catalog();
         for(var ei=0;ei<entries.length;ei++) (function(entry){test("catalog "+(entry.expected ? "READY " : "SKIP ")+entry.name,function(){
             var c=fresh(),f=PedroStrokeFixtures.fromCase(c,entry),before=c.numLayers;
@@ -93,10 +130,10 @@
                 assert(c.numLayers===before && f.layer.enabled,"Rejected case mutated");
             }
         });})(entries[ei]);
-        test("expanded demo: 12 READY / 11 SKIP layers",function(){
+        test("expanded demo: 21 READY / 15 SKIP layers",function(){
             var demo=PedroStrokeFixtures.demo();
             for(var di=0;di<demo.comps.length;di++)owned.push(demo.comps[di]);
-            assert(demo.comps[0].numLayers===12 && demo.comps[1].numLayers===11,"Wrong demo counts");
+            assert(demo.comps[0].numLayers===21 && demo.comps[1].numLayers===15,"Wrong demo counts");
             demo.comps[0].saveFrameToPng(0,new File(outputDir.fsName+"/fixtures-ready.png"));
             demo.comps[1].saveFrameToPng(0,new File(outputDir.fsName+"/fixtures-skip.png"));
         });

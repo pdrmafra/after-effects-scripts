@@ -1,5 +1,6 @@
 // Deliberately creates and leaves two synthetic demo comps. Never saves the project.
 (function () {
+    #include "circular.jsxinc"
     #include "geometry.jsxinc"
     #include "host.jsxinc"
     #include "fixtures.jsxinc"

@@ -26,10 +26,10 @@ var PedroStrokeHost = (function () {
             if(blend && blend.value!==1) fail("Non-normal group blend mode is not supported.");
             return leaf(group.property("ADBE Vectors Group"),chain.concat([group.propertyIndex]));
         }
-        if(groups.length || paths.length!==1 || fills.length!==1) fail("Select a layer with exactly one path and one solid fill, optionally inside a single nested group chain.");
+        if(groups.length || (paths.length!==1 && paths.length!==2) || fills.length!==1) fail("Select one supported outline, or two circular ring contours, with one solid fill inside a single group chain.");
         var fillBlend=fills[0].property("ADBE Vector Blend Mode");
         if(fillBlend && fillBlend.value!==1) fail("Non-normal fill blend mode is not supported.");
-        return {chain:chain,path:paths[0],fill:fills[0]};
+        return {chain:chain,path:paths[0],paths:paths,fill:fills[0]};
     }
     function snapshot(layer) {
         if(!layer || layer.matchName!=="ADBE Vector Layer") fail("Select a shape layer.");
@@ -46,7 +46,16 @@ var PedroStrokeHost = (function () {
         var contents=layer.property("ADBE Root Vectors Group");
         staticTree(contents);
         var found=leaf(contents,[]),source=found.path,geometry;
-        if(source.matchName==="ADBE Vector Shape - Rect") geometry=PedroStrokeGeometry.rectangle(
+        if(found.paths.length===2) {
+            var shapes=[];
+            for(var pi=0;pi<2;pi++) {
+                if(found.paths[pi].matchName!=="ADBE Vector Shape - Group") fail("Ring contours must be Bezier paths.");
+                shapes.push(found.paths[pi].property("ADBE Vector Shape").value);
+            }
+            var rule=found.fill.property("ADBE Vector Fill Rule");
+            if(!rule) fail("Cannot determine the compound fill rule.");
+            geometry=PedroStrokeCircular.ring(shapes,rule.value);
+        } else if(source.matchName==="ADBE Vector Shape - Rect") geometry=PedroStrokeGeometry.rectangle(
             source.property("ADBE Vector Rect Size").value,source.property("ADBE Vector Rect Position").value,source.property("ADBE Vector Rect Roundness").value);
         else geometry=PedroStrokeGeometry.recognize(source.property("ADBE Vector Shape").value);
         return {layer:layer,chain:found.chain,geometry:geometry,color:found.fill.property("ADBE Vector Fill Color").value,
@@ -65,8 +74,8 @@ var PedroStrokeHost = (function () {
         for(var i=0;i<chain.length;i++) c=c.property(chain[i]).property("ADBE Vectors Group");
         return c;
     }
-    function shape(vertices) {
-        var s=new Shape();s.vertices=vertices;s.inTangents=[[0,0],[0,0]];s.outTangents=[[0,0],[0,0]];s.closed=false;return s;
+    function shape(data) {
+        var s=new Shape();s.vertices=data.vertices;s.inTangents=data.inTangents;s.outTangents=data.outTangents;s.closed=data.closed;return s;
     }
     function unique(comp,base) {
         var name=base,n=2,exists=true;
@@ -81,9 +90,8 @@ var PedroStrokeHost = (function () {
         var c=contentsAt(copy,plan.chain);
         for(var i=c.numProperties;i>=1;i--) c.property(i).remove();
         var path=c.addProperty("ADBE Vector Shape - Group");path.name="Recovered Centerline";
-        var vertices=plan.geometry.vertices;
-        if(options.reverse) vertices=[vertices[1],vertices[0]];
-        path.property("ADBE Vector Shape").setValue(shape(vertices));
+        var data=PedroStrokeCircular.path(plan.geometry,options.reverse);
+        path.property("ADBE Vector Shape").setValue(shape(data));
         // Indexed groups invalidate property handles after addProperty: reacquire each time.
         var stroke=contentsAt(copy,plan.chain).addProperty("ADBE Vector Graphic - Stroke");
         stroke.property("ADBE Vector Stroke Width").setValue(plan.geometry.width);
@@ -100,8 +108,12 @@ var PedroStrokeHost = (function () {
         c=contentsAt(copy,plan.chain);
         var check=c.property(1).property("ADBE Vector Shape").value;
         var actualWidth=c.property(2).property("ADBE Vector Stroke Width").value;
-        if(check.closed || check.vertices.length!==2 || c.numProperties!==3 || Math.abs(actualWidth-plan.geometry.width)>Math.max(0.0001,plan.geometry.width*0.00001)) fail("Generated geometry verification failed.");
-        for(i=0;i<2;i++) for(var d=0;d<2;d++) if(Math.abs(check.vertices[i][d]-vertices[i][d])>Math.max(0.0001,Math.abs(vertices[i][d])*0.00001)) fail("Generated path point verification failed.");
+        if(check.closed!==data.closed || check.vertices.length!==data.vertices.length || c.numProperties!==3 || Math.abs(actualWidth-plan.geometry.width)>Math.max(0.0001,plan.geometry.width*0.00001)) fail("Generated geometry verification failed.");
+        for(var f=0;f<3;f++) {
+            var key=["vertices","inTangents","outTangents"][f];
+            if(check[key].length!==data[key].length) fail("Generated path tangent count verification failed.");
+            for(i=0;i<data.vertices.length;i++) for(var d=0;d<2;d++) if(Math.abs(check[key][i][d]-data[key][i][d])>Math.max(0.0001,Math.abs(data[key][i][d])*0.00001)) fail("Generated path point/tangent verification failed.");
+        }
         copy.name=unique(comp,plan.name+" [Centerline]");
         copy.comment="Shape to Stroke prototype; original action: "+options.originalAction+". "+plan.geometry.kind+"; local sampled fit error "+plan.geometry.fitError;
     }
