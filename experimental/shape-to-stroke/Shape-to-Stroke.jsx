@@ -1,5 +1,5 @@
 // Shape to Stroke 0.0.5-prototype — Pedro Mafra
-// MIT License. Local experimental build; not part of the public beta.
+// MIT License. Experimental build; test on a saved project copy.
 (function () {
 // Pure ES3: circular cubic contours only. Not a general centerline/skeleton solver.
 var PedroStrokeCircular = (function () {

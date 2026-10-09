@@ -1,6 +1,18 @@
-# Validation — 0.1.0-beta.1
+# Validation
 
 Executed on **2026-10-08**. These are bounded tests, not exhaustive production certification.
+
+The core/depth evidence below refers to `0.1.0-beta.1`. The current `main` additionally includes the experimental Shape to Stroke build and validation described here.
+
+## Shape to Stroke 0.0.5 — 2026-10-09
+
+- **208 Node tests:** conservative geometric recognition, uniform polygon/rounded offsets, normalized handles/vertices, circle/arc fitting, winding/fill rules, bounds/topology, cyclic starts/reversal, compact dialog/preferences and mocked recovery/write-verification faults.
+- **129 native scenarios:** AE 26.5x89 on macOS 27.0.1, all 73 synthetic catalog shapes, both original actions, mixed-batch Delete, reverse/animated Trim, corner/cap settings, parenting rejection and isolated preference save/read with cleanup. Temporary native fixtures were removed; user options and existing comps were not modified or saved. Separate approved READY/SKIP manual demo comps were left for testing.
+- **39 full-reveal render pairs:** identical silhouette bounds; normalized alpha differences below 0.6% of painted area, not pixel identity. **35 draw-on samples** were empty at 0% and increased in coverage.
+- Manual preference persistence across an AE restart, manual Undo/Redo, real Figma/Illustrator samples, Windows and older AE remain unverified. Synthetic fixtures are not exporter compatibility evidence.
+- [Tool guide](../experimental/shape-to-stroke/README.md) and [applicability map](../experimental/shape-to-stroke/CAPABILITIES.md).
+
+Root build/check and CI now include the experimental tool: **240 Node tests** in total. Native tests remain permissioned/manual; CI never launches After Effects or downloads model weights.
 
 ## Automated checks
 

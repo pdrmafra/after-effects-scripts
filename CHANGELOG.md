@@ -1,5 +1,14 @@
 # Changelog
 
+## Current main — 2026-10-09
+
+- Add Shape to Stroke `0.0.5` as an explicitly experimental standalone tool, with one canonical build and no version-suffixed copies.
+- Recover supported bars/capsules, circular rings/arcs, polygon/rounded frames and angular connectors; retain conservative width/topology checks and full-batch preflight.
+- Compact dialog with Keep disabled/Delete, animated Trim Paths, Reverse, Create and Cancel; remember successful choices.
+- Add applicability map, 73 synthetic fixtures, 208 tool-specific Node tests and documented native/render validation.
+- Include the experimental build and tests in root `npm run build`, `npm run check` and GitHub CI. The current Node suite totals 240 tests.
+- Publish the latest source on `main`; keep historical commits/tags for recovery rather than maintaining separate old builds.
+
 ## 0.1.0-beta.1 — 2026-10-08
 
 First curated public collection, derived from Pedro's personal scripts. Originals remain unchanged.

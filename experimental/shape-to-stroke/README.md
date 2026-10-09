@@ -1,6 +1,6 @@
-# Shape to Stroke — local prototype 0.0.5
+# Shape to Stroke — experimental 0.0.5
 
-Recover an editable centerline from supported filled bars, capsules, rings, arc bands, polygon/rounded frames and angular connectors. This is a local experiment, **not part of the published `0.1.0-beta.1` release**. Test on a saved project copy. Own code follows the collection's MIT license. See [CAPABILITIES.md](CAPABILITIES.md) for the applicability analysis, implemented families and limits.
+Recover an editable centerline from supported filled bars, capsules, rings, arc bands, polygon/rounded frames and angular connectors. This experimental build is available in the collection's current `main`; **the older `0.1.0-beta.1` release ZIP does not include it**. Test on a saved project copy. Own code follows the collection's MIT license. See [CAPABILITIES.md](CAPABILITIES.md) for the applicability analysis, implemented families and limits.
 
 ## Architecture
 
@@ -96,7 +96,7 @@ Optional QA after running `native-test.jsx`, with numpy/opencv available:
 python verify-renders.py
 ```
 
-Pedro reported the prototype and compact revision worked. Manual preference persistence across an AE restart, manual Undo/Redo, Windows, older AE, animated-parent cases and real exporter samples remain unverified. The root collection build/tests are deliberately unchanged; run this prototype's suite separately.
+Pedro reported the prototype and compact revision worked. Manual preference persistence across an AE restart, manual Undo/Redo, Windows, older AE, animated-parent cases and real exporter samples remain unverified. Root `npm run build`, `npm run check` and CI include this experimental build/suite; the standalone development commands above remain available.
 
 ## Next adapters
 
