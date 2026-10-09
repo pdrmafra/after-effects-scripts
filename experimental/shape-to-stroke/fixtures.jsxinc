@@ -1,30 +1,109 @@
 var PedroStrokeFixtures = (function () {
     function toShape(data) {var s=new Shape();s.vertices=data.vertices;s.inTangents=data.inTangents;s.outTangents=data.outTangents;s.closed=data.closed;return s;}
-    function source(comp,name,parametric,rounded,angle,nested) {
+    function source(comp,name,parametric,rounded,angle,nested,options) {
+        options=options || {};
         var layer=comp.layers.addShape();layer.name=name;
         var contents=layer.property("ADBE Root Vectors Group"),chain=[];
         var outer=contents.addProperty("ADBE Vector Group");outer.name="Imported outline";chain.push(outer.propertyIndex);
         if(nested) {
             outer.property("ADBE Vector Transform Group").property("ADBE Vector Rotation").setValue(17);
-            outer.property("ADBE Vector Transform Group").property("ADBE Vector Scale").setValue([120,80]);
+            outer.property("ADBE Vector Transform Group").property("ADBE Vector Scale").setValue(options.mirror ? [-120,80] : [120,80]);
             var inner=outer.property("ADBE Vectors Group").addProperty("ADBE Vector Group");inner.name="Nested";chain.push(inner.propertyIndex);
         }
         contents=PedroStrokeHost.contentsAt(layer,chain);
         if(parametric) {
             var rect=contents.addProperty("ADBE Vector Shape - Rect");
-            rect.property("ADBE Vector Rect Size").setValue([200,20]);
-            rect.property("ADBE Vector Rect Position").setValue([10,-5]);
-            rect.property("ADBE Vector Rect Roundness").setValue(rounded ? 10 : 0);
+            var size=options.size || [200,20];
+            rect.property("ADBE Vector Rect Size").setValue(size);
+            rect.property("ADBE Vector Rect Position").setValue(options.center || [10,-5]);
+            rect.property("ADBE Vector Rect Roundness").setValue(typeof options.roundness==="number" ? options.roundness : (rounded ? Math.min(size[0],size[1])/2 : 0));
             var group=layer.property("ADBE Root Vectors Group").property(chain[0]);
             group.property("ADBE Vector Transform Group").property("ADBE Vector Rotation").setValue(angle);
         } else {
             var path=contents.addProperty("ADBE Vector Shape - Group");
-            path.property("ADBE Vector Shape").setValue(toShape(PedroStrokeGeometry.fixture(200,20,rounded,angle,[10,-5])));
+            path.property("ADBE Vector Shape").setValue(toShape(options.data || PedroStrokeGeometry.fixture(200,20,rounded,angle,[10,-5])));
+            if(options.extraPath) {
+                var extra=PedroStrokeHost.contentsAt(layer,chain).addProperty("ADBE Vector Shape - Group");
+                extra.property("ADBE Vector Shape").setValue(toShape(options.extraPath));
+            }
         }
         var fill=PedroStrokeHost.contentsAt(layer,chain).addProperty("ADBE Vector Graphic - Fill");
         fill.property("ADBE Vector Fill Color").setValue([0.1,0.7,0.9,1]);
         fill.property("ADBE Vector Fill Opacity").setValue(73);
         return {layer:layer,chain:chain};
     }
-    return {source:source,toShape:toShape};
+    function reverse(data) {var incoming=data.inTangents;data.vertices.reverse();data.inTangents=data.outTangents.reverse();data.outTangents=incoming.reverse();return data;}
+    function straight(points) {
+        var data={vertices:points,inTangents:[],outTangents:[],closed:true};
+        for(var i=0;i<points.length;i++){data.inTangents.push([0,0]);data.outTangents.push([0,0]);}return data;
+    }
+    function ellipse(width,height) {
+        var x=width/2,y=height/2,k=0.5522847498307936;
+        return {vertices:[[0,-y],[x,0],[0,y],[-x,0]],inTangents:[[-k*x,0],[0,-k*y],[k*x,0],[0,k*y]],outTangents:[[k*x,0],[0,k*y],[-k*x,0],[0,-k*y]],closed:true};
+    }
+    function catalog() {
+        var cases=[];
+        function add(name,expected,parametric,rounded,angle,nested,options) {cases.push({name:name,expected:expected,parametric:parametric,rounded:rounded,angle:angle,nested:nested,options:options || {}});}
+        add("Native horizontal rectangle",true,true,false,0,false);
+        add("Native vertical capsule",true,true,true,0,false,{size:[20,200]});
+        add("Bezier rectangle 45deg",true,false,false,45,false);
+        add("Bezier capsule 25deg",true,false,true,25,false);
+        add("Vertical Bezier rectangle",true,false,false,90,false);
+        add("Nested mirrored capsule",true,false,true,0,true,{mirror:true});
+        add("Thin 2-unit rectangle",true,false,false,0,false,{data:PedroStrokeGeometry.fixture(240,2,false,0,[0,0])});
+        add("Thick capsule",true,false,true,0,false,{data:PedroStrokeGeometry.fixture(180,70,true,0,[0,0])});
+        add("Short capsule",true,false,true,0,false,{data:PedroStrokeGeometry.fixture(90,70,true,0,[0,0])});
+        var eight=PedroStrokeGeometry.fixture(200,20,true,0,[0,0]);
+        for(var di=0;di<2;di++) {
+            var index=di===0 ? 2 : 6;
+            eight.vertices.splice(index,0,eight.vertices[index]);eight.inTangents.splice(index,0,eight.inTangents[index]);
+            eight.inTangents[index+1]=[0,0];eight.outTangents.splice(index,0,[0,0]);
+        }
+        add("Eight-vertex capsule",true,false,true,0,false,{data:eight});
+        add("Reversed winding capsule",true,false,true,0,false,{data:reverse(PedroStrokeGeometry.fixture(200,20,true,35,[0,0]))});
+        var restarted=PedroStrokeGeometry.fixture(200,20,false,10,[0,0]);
+        for(var shift=0;shift<2;shift++) {restarted.vertices.push(restarted.vertices.shift());restarted.inTangents.push(restarted.inTangents.shift());restarted.outTangents.push(restarted.outTangents.shift());}
+        add("Rectangle changed first vertex",true,false,false,0,false,{data:restarted});
+        add("Triangle",false,false,false,0,false,{data:straight([[-80,60],[0,-80],[80,60]])});
+        var star=[];
+        for(var i=0;i<10;i++){var a=-Math.PI/2+i*Math.PI/5,r=i%2 ? 35 : 80;star.push([Math.cos(a)*r,Math.sin(a)*r]);}
+        add("Star",false,false,false,0,false,{data:straight(star)});
+        add("L-shaped outline",false,false,false,0,false,{data:straight([[-70,-70],[-40,-70],[-40,40],[70,40],[70,70],[-70,70]])});
+        add("Trapezoid",false,false,false,0,false,{data:straight([[-90,-25],[65,-25],[90,25],[-90,25]])});
+        add("Intermediate corner radius",false,true,true,0,false,{roundness:5});
+        add("Circle",false,false,false,0,false,{data:ellipse(140,140)});
+        add("Ellipse",false,false,false,0,false,{data:ellipse(220,110)});
+        add("Ring compound path",false,false,false,0,false,{data:ellipse(160,160),extraPath:reverse(ellipse(110,110))});
+        var ro=85,ri=55,k=0.5522847498307936;
+        add("Quarter arc band",false,false,false,0,false,{data:{vertices:[[-ro,0],[0,-ro],[0,-ri],[-ri,0]],
+            inTangents:[[0,0],[-k*ro,0],[0,0],[0,-k*ri]],outTangents:[[0,-k*ro],[0,0],[-k*ri,0],[0,0]],closed:true}});
+        var variable=PedroStrokeGeometry.fixture(200,20,true,0,[0,0]);variable.vertices[3][1]+=8;
+        add("Variable-width capsule",false,false,true,0,false,{data:variable});
+        var curved=PedroStrokeGeometry.fixture(200,20,true,0,[0,0]);curved.outTangents[1][0]*=2;
+        add("Distorted curved outline",false,false,true,0,false,{data:curved});
+        return cases;
+    }
+    function fromCase(comp,entry,name) {return source(comp,name || entry.name,entry.parametric,entry.rounded,entry.angle,entry.nested,entry.options);}
+    function demo() {
+        var entries=catalog(),created=[],ready=null;
+        try {
+            for(var section=0;section<2;section++) {
+                var expected=section===0,c=app.project.items.addComp("Shape to Stroke "+(expected ? "READY" : "SKIP")+" "+new Date().getTime(),1200,1040,1,4,24);
+                created.push(c);if(expected)ready=c;var count=0;
+                for(var i=0;i<entries.length;i++) if(entries[i].expected===expected) {
+                    var name=(count+1<10 ? "0" : "")+(count+1)+" "+(expected ? "READY" : "SKIP")+" - "+entries[i].name;
+                    var f=fromCase(c,entries[i],name);
+                    f.layer.property("ADBE Transform Group").property("ADBE Position").setValue([200+(count%3)*400,140+Math.floor(count/3)*240]);
+                    f.layer.selected=false;count++;
+                }
+                c.time=0;
+            }
+            ready.layer(ready.numLayers).selected=true;
+            return {comps:created,ready:ready};
+        } catch(error) {
+            for(var j=created.length-1;j>=0;j--) {try{created[j].remove();}catch(cleanup){}}
+            throw error;
+        }
+    }
+    return {source:source,toShape:toShape,catalog:catalog,fromCase:fromCase,demo:demo};
 }());

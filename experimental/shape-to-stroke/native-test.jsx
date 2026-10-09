@@ -2,6 +2,7 @@
 (function () {
     #include "geometry.jsxinc"
     #include "host.jsxinc"
+    #include "settings.jsxinc"
     #include "fixtures.jsxinc"
     var owned=[],lines=[],passed=0,failed=0,oldActive=app.project.activeItem,oldSelection=app.project.selection;
     var outputDir=new File($.fileName).parent;
@@ -78,6 +79,42 @@
             child.parent=f.layer;
             rejects(function(){PedroStrokeHost.create(c,[f.layer],{originalAction:"delete"});});
             assert(c.numLayers===2 && f.layer.enabled && child.parent===f.layer,"Parent dependency mutated");
+        });
+        var entries=PedroStrokeFixtures.catalog();
+        for(var ei=0;ei<entries.length;ei++) (function(entry){test("catalog "+(entry.expected ? "READY " : "SKIP ")+entry.name,function(){
+            var c=fresh(),f=PedroStrokeFixtures.fromCase(c,entry),before=c.numLayers;
+            var results=PedroStrokeHost.analyze([f.layer]);
+            assert(results[0].ok===entry.expected,"Unexpected classification: "+(results[0].reason || "accepted"));
+            if(entry.expected) {
+                var copy=PedroStrokeHost.create(c,[f.layer],{originalAction:"disable"})[0];
+                assert(c.numLayers===before+1 && !f.layer.enabled && copy.selected,"Wrong successful conversion state");
+            } else {
+                rejects(function(){PedroStrokeHost.create(c,[f.layer],{originalAction:"delete"});});
+                assert(c.numLayers===before && f.layer.enabled,"Rejected case mutated");
+            }
+        });})(entries[ei]);
+        test("expanded demo: 12 READY / 11 SKIP layers",function(){
+            var demo=PedroStrokeFixtures.demo();
+            for(var di=0;di<demo.comps.length;di++)owned.push(demo.comps[di]);
+            assert(demo.comps[0].numLayers===12 && demo.comps[1].numLayers===11,"Wrong demo counts");
+            demo.comps[0].saveFrameToPng(0,new File(outputDir.fsName+"/fixtures-ready.png"));
+            demo.comps[1].saveFrameToPng(0,new File(outputDir.fsName+"/fixtures-skip.png"));
+        });
+        test("native option persistence in isolated test namespace / cleanup",function(){
+            var section="PedroMafra.ShapeToStroke.Tests",key="options_v1",prefSection="Settings_"+section;
+            var existed=app.settings.haveSetting(section,key),previous=existed ? app.settings.getSetting(section,key) : null;
+            var api={haveSetting:function(s,k){return app.settings.haveSetting(section,k);},getSetting:function(s,k){return app.settings.getSetting(section,k);},saveSetting:function(s,k,v){app.settings.saveSetting(section,k,v);}};
+            try {
+                assert(PedroStrokeSettings.write({originalAction:"delete",animate:true,reverse:true},api),"Preference write failed");
+                var saved=PedroStrokeSettings.read(api);assert(saved.originalAction==="delete" && saved.animate && saved.reverse,"Preference read mismatch");
+            } finally {
+                if(existed)app.settings.saveSetting(section,key,previous);
+                else {
+                    assert(app.preferences.havePref(prefSection,key),"Test preference backend not found; no unrelated preference was removed");
+                    app.preferences.deletePref(prefSection,key);
+                    assert(!app.settings.haveSetting(section,key),"Test preference cleanup failed");
+                }
+            }
         });
     } finally {
         for(var i=owned.length-1;i>=0;i--) {try{owned[i].remove();}catch(e){failed++;lines.push("CLEANUP FAILED "+e.toString());}}

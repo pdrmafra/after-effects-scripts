@@ -1,0 +1,26 @@
+// Stores options only, never project content. One strict record avoids partial writes.
+var PedroStrokeSettings = (function () {
+    var section="PedroMafra.ShapeToStroke",key="options_v1";
+    function defaults() {return {originalAction:"disable",animate:false,reverse:false};}
+    function decode(value) {
+        if(typeof value!=="string" || !/^v1\|(disable|delete)\|[01]\|[01]$/.test(value)) return defaults();
+        var fields=value.split("|");
+        return {originalAction:fields[1],animate:fields[2]==="1",reverse:fields[3]==="1"};
+    }
+    function read(api) {
+        try {api=api || app.settings;return api.haveSetting(section,key) ? decode(api.getSetting(section,key)) : defaults();}
+        catch(e) {return defaults();}
+    }
+    function write(options,api) {
+        try {
+            api=api || app.settings;
+            var value="v1|"+(options.originalAction==="delete" ? "delete" : "disable")+"|"+(options.animate ? "1" : "0")+"|"+(options.reverse ? "1" : "0");
+            api.saveSetting(section,key,value);return true;
+        } catch(e) {
+            // Saving a preference must not turn a successful layer edit into a reported failure.
+            try{$.writeln("Shape to Stroke: options could not be saved: "+e.toString());}catch(ignore){}
+            return false;
+        }
+    }
+    return {read:read,write:write,decode:decode};
+}());

@@ -2,18 +2,23 @@ function showStrokePrototype() {
     var comp=app.project && app.project.activeItem;
     if(!(comp instanceof CompItem)) {alert("Open a composition and select source shape layers.");return;}
     var win=new Window("dialog","Shape to Stroke");
+    var saved=PedroStrokeSettings.read();
     win.orientation="column";win.alignChildren=["fill","top"];
     var original=win.add("group");
     original.add("statictext",undefined,"Original:");
-    var action=original.add("dropdownlist",undefined,["Keep disabled","Delete"]);action.selection=0;
+    var action=original.add("dropdownlist",undefined,["Keep disabled","Delete"]);action.selection=saved.originalAction==="delete" ? 1 : 0;
     var animate=win.add("checkbox",undefined,"Animate Trim Paths");
+    animate.value=saved.animate;
     var reverse=win.add("checkbox",undefined,"Reverse");
+    reverse.value=saved.reverse;
     var buttons=win.add("group");buttons.alignment="right";
     var create=buttons.add("button",undefined,"Create",{name:"ok"});
     buttons.add("button",undefined,"Cancel",{name:"cancel"});
     create.onClick=function(){
         try {
-            PedroStrokeHost.create(comp,comp.selectedLayers,{reverse:reverse.value,animate:animate.value,frames:12,originalAction:action.selection.index===1 ? "delete" : "disable"});
+            var options={reverse:reverse.value,animate:animate.value,frames:12,originalAction:action.selection.index===1 ? "delete" : "disable"};
+            PedroStrokeHost.create(comp,comp.selectedLayers,options);
+            PedroStrokeSettings.write(options);
             win.close(1);
         } catch(e) {alert(e.toString());}
     };

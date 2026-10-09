@@ -1,4 +1,4 @@
-// Shape to Stroke 0.0.2-prototype — Pedro Mafra
+// Shape to Stroke 0.0.3-prototype — Pedro Mafra
 // MIT License. Local experimental build; not part of the public beta.
 (function () {
 // Pure ES3 geometry. No AE objects, mutations or external dependencies.
@@ -287,22 +287,54 @@ var PedroStrokeHost = (function () {
     return {snapshot:snapshot,analyze:analyze,create:create,contentsAt:contentsAt};
 }());
 
+// Stores options only, never project content. One strict record avoids partial writes.
+var PedroStrokeSettings = (function () {
+    var section="PedroMafra.ShapeToStroke",key="options_v1";
+    function defaults() {return {originalAction:"disable",animate:false,reverse:false};}
+    function decode(value) {
+        if(typeof value!=="string" || !/^v1\|(disable|delete)\|[01]\|[01]$/.test(value)) return defaults();
+        var fields=value.split("|");
+        return {originalAction:fields[1],animate:fields[2]==="1",reverse:fields[3]==="1"};
+    }
+    function read(api) {
+        try {api=api || app.settings;return api.haveSetting(section,key) ? decode(api.getSetting(section,key)) : defaults();}
+        catch(e) {return defaults();}
+    }
+    function write(options,api) {
+        try {
+            api=api || app.settings;
+            var value="v1|"+(options.originalAction==="delete" ? "delete" : "disable")+"|"+(options.animate ? "1" : "0")+"|"+(options.reverse ? "1" : "0");
+            api.saveSetting(section,key,value);return true;
+        } catch(e) {
+            // Saving a preference must not turn a successful layer edit into a reported failure.
+            try{$.writeln("Shape to Stroke: options could not be saved: "+e.toString());}catch(ignore){}
+            return false;
+        }
+    }
+    return {read:read,write:write,decode:decode};
+}());
+
 function showStrokePrototype() {
     var comp=app.project && app.project.activeItem;
     if(!(comp instanceof CompItem)) {alert("Open a composition and select source shape layers.");return;}
     var win=new Window("dialog","Shape to Stroke");
+    var saved=PedroStrokeSettings.read();
     win.orientation="column";win.alignChildren=["fill","top"];
     var original=win.add("group");
     original.add("statictext",undefined,"Original:");
-    var action=original.add("dropdownlist",undefined,["Keep disabled","Delete"]);action.selection=0;
+    var action=original.add("dropdownlist",undefined,["Keep disabled","Delete"]);action.selection=saved.originalAction==="delete" ? 1 : 0;
     var animate=win.add("checkbox",undefined,"Animate Trim Paths");
+    animate.value=saved.animate;
     var reverse=win.add("checkbox",undefined,"Reverse");
+    reverse.value=saved.reverse;
     var buttons=win.add("group");buttons.alignment="right";
     var create=buttons.add("button",undefined,"Create",{name:"ok"});
     buttons.add("button",undefined,"Cancel",{name:"cancel"});
     create.onClick=function(){
         try {
-            PedroStrokeHost.create(comp,comp.selectedLayers,{reverse:reverse.value,animate:animate.value,frames:12,originalAction:action.selection.index===1 ? "delete" : "disable"});
+            var options={reverse:reverse.value,animate:animate.value,frames:12,originalAction:action.selection.index===1 ? "delete" : "disable"};
+            PedroStrokeHost.create(comp,comp.selectedLayers,options);
+            PedroStrokeSettings.write(options);
             win.close(1);
         } catch(e) {alert(e.toString());}
     };
