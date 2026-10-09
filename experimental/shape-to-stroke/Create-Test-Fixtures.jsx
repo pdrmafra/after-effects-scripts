@@ -20,7 +20,7 @@
         PedroStrokeHost.contentsAt(bad.layer,bad.chain).property(1).property("ADBE Vector Rect Roundness").setValue(5);
         bad.layer.property("ADBE Transform Group").property("ADBE Position").setValue([640,900]);bad.layer.selected=false;
         comp.time=0;comp.openInViewer();
-        alert("Created a synthetic demo comp with six supported examples and one negative fixture.\nSelect one READY layer and run Shape-to-Stroke.jsx.\nChoose Hide originals + draw-on keys to inspect motion, or compare visibility manually.\nUndo removes this demo comp; your existing comps were not edited.");
+        alert("Created a synthetic demo comp with six supported examples and one negative fixture.\nSelect one READY layer and run Shape-to-Stroke.jsx.\nChoose Keep disabled + Animate Trim Paths to inspect motion.\nUndo removes this demo comp; your existing comps were not edited.");
     } catch(e) {if(comp) {try{comp.remove();}catch(cleanup){}}alert(e.toString());}
     finally {app.endUndoGroup();}
 }());

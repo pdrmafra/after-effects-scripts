@@ -23,7 +23,7 @@
             c.saveFrameToPng(0,new File(outputDir.fsName+"/"+row[0]+"-before.png"));
             f.layer.selected=true;
             var copies=PedroStrokeHost.create(c,[f.layer],{}),copy=copies[0];
-            assert(c.numLayers===2 && f.layer.enabled && f.layer.selected,"Original visibility/selection changed");
+            assert(c.numLayers===2 && !f.layer.enabled && !f.layer.selected && copy.selected,"Original not retained disabled / replacement not selected");
             assert(PedroStrokeHost.contentsAt(f.layer,f.chain).property(1).matchName===match,"Original path replaced");
             var out=PedroStrokeHost.contentsAt(copy,f.chain),stroke=out.property(2);
             assert(stroke.property("ADBE Vector Stroke Line Cap").value===(row[2]?2:1),"Wrong cap");
@@ -33,10 +33,10 @@
             f.layer.enabled=false;
             c.saveFrameToPng(0,new File(outputDir.fsName+"/"+row[0]+"-after.png"));
         });})(cases[ci]);
-        test("reverse / draw-on / explicit hide",function(){
+        test("reverse / draw-on / keep disabled",function(){
             var c=fresh(),f=PedroStrokeFixtures.source(c,"Source",false,true,0,false);c.time=0.5;
             var model=PedroStrokeHost.snapshot(f.layer).geometry;
-            var copy=PedroStrokeHost.create(c,[f.layer],{reverse:true,animate:true,frames:12,hideOriginal:true})[0];
+            var copy=PedroStrokeHost.create(c,[f.layer],{reverse:true,animate:true,frames:12,originalAction:"disable"})[0];
             var out=PedroStrokeHost.contentsAt(copy,f.chain),s=out.property(1).property("ADBE Vector Shape").value;
             assert(near(s.vertices[0][0],model.vertices[1][0]),"Direction not reversed");
             var end=out.property(3).property("ADBE Vector Trim End");
@@ -59,12 +59,25 @@
         });
         test("malformed duration rejects whole batch before mutation",function(){
             var c=fresh(),a=PedroStrokeFixtures.source(c,"First",true,false,0,false),b=PedroStrokeFixtures.source(c,"Second",true,false,0,false);
-            rejects(function(){PedroStrokeHost.create(c,[a.layer,b.layer],{animate:true,frames:"2abc",hideOriginal:true});});
+            rejects(function(){PedroStrokeHost.create(c,[a.layer,b.layer],{animate:true,frames:"2abc",originalAction:"disable"});});
             assert(c.numLayers===2 && a.layer.enabled && b.layer.enabled,"Batch changed");
         });
         test("draw-on outside visible layer is rejected",function(){
             var c=fresh(),f=PedroStrokeFixtures.source(c,"Source",true,false,0,false);c.time=3.9;
             rejects(function(){PedroStrokeHost.create(c,[f.layer],{animate:true,frames:12});});assert(c.numLayers===1,"Out-of-range created copy");
+        });
+        test("explicit delete removes originals only after complete batch conversion",function(){
+            var c=fresh(),a=PedroStrokeFixtures.source(c,"First",true,false,0,false),b=PedroStrokeFixtures.source(c,"Second",false,true,30,false);
+            var ids=[a.layer.id,b.layer.id],copies=PedroStrokeHost.create(c,[a.layer,b.layer],{originalAction:"delete"});
+            assert(c.numLayers===2 && copies.length===2,"Wrong replacement count");
+            for(var i=1;i<=c.numLayers;i++) assert(c.layer(i).id!==ids[0] && c.layer(i).id!==ids[1] && c.layer(i).selected,"Original retained or replacement not selected");
+            for(i=0;i<copies.length;i++) assert(PedroStrokeHost.contentsAt(copies[i],i===0 ? a.chain : b.chain).property(1).property("ADBE Vector Shape").value.vertices.length===2,"Replacement path invalid");
+        });
+        test("delete blocks parent dependency without mutation",function(){
+            var c=fresh(),f=PedroStrokeFixtures.source(c,"Parent",true,false,0,false),child=c.layers.addShape();
+            child.parent=f.layer;
+            rejects(function(){PedroStrokeHost.create(c,[f.layer],{originalAction:"delete"});});
+            assert(c.numLayers===2 && f.layer.enabled && child.parent===f.layer,"Parent dependency mutated");
         });
     } finally {
         for(var i=owned.length-1;i>=0;i--) {try{owned[i].remove();}catch(e){failed++;lines.push("CLEANUP FAILED "+e.toString());}}

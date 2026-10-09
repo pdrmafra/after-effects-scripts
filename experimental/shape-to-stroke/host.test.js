@@ -30,7 +30,7 @@ function Layer(comp,name){this.comp=comp;this.containingComp=comp;this.name=name
 Object.defineProperty(Layer.prototype,"numProperties",{get:function(){return this.root.numProperties;}});
 Layer.prototype.property=function(n){return this.root.property(n);};
 Layer.prototype.duplicate=function(){var copy=new Layer(this.comp,this.name+" copy");copy.sourceName=this.name;copy.root=cloneGroup(this.root,copy);this.selected=false;return copy;};
-Layer.prototype.remove=function(){this.comp.layers.splice(this.comp.layers.indexOf(this),1);};
+Layer.prototype.remove=function(){if(this.comp.failRemove===this.name)throw new Error("injected removal failure");this.comp.layers.splice(this.comp.layers.indexOf(this),1);};
 function source(c,name){var l=new Layer(c,name);var root=l.property("ADBE Root Vectors Group");root.addProperty("ADBE Vector Shape - Rect");root.addProperty("ADBE Vector Graphic - Fill");return l;}
 `,c);
   for(const f of ["geometry.jsxinc","host.jsxinc"])vm.runInContext(fs.readFileSync(__dirname+"/"+f,"utf8"),c);
@@ -39,14 +39,29 @@ function source(c,name){var l=new Layer(c,name);var root=l.property("ADBE Root V
 test("analysis leaves all source state untouched",()=>{
   const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A");var r=PedroStrokeHost.analyze([a]);[r[0].ok,c.numLayers,a.enabled,a.selected,a.property("ADBE Root Vectors Group").numProperties,app.groups]`),[true,1,true,true,2,0]);
 });
-test("successful copies retain original geometry and default visibility",()=>{
-  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A");var copy=PedroStrokeHost.create(c,[a],{})[0];[c.numLayers,a.enabled,a.selected,copy.selected,a.property("ADBE Root Vectors Group").numProperties,copy.property("ADBE Root Vectors Group").numProperties,app.groups]`),[2,true,true,false,2,3,0]);
+test("default creates selected replacement and retains disabled original geometry",()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A");var copy=PedroStrokeHost.create(c,[a],{})[0];[c.numLayers,a.enabled,a.selected,copy.selected,a.property("ADBE Root Vectors Group").numProperties,copy.property("ADBE Root Vectors Group").numProperties,app.groups]`),[2,false,false,true,2,3,0]);
 });
-test("hide and animation require explicit options",()=>{
-  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A");c.time=0.25;var copy=PedroStrokeHost.create(c,[a],{hideOriginal:true,animate:true,frames:12})[0];[a.enabled,copy.property("ADBE Root Vectors Group").property(3).property("ADBE Vector Trim End").keys]`),[false,[[0.25,0],[0.75,100]]]);
+test("animation remains optional and begins at current time",()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A");c.time=0.25;var copy=PedroStrokeHost.create(c,[a],{originalAction:"disable",animate:true,frames:12})[0];[a.enabled,copy.property("ADBE Root Vectors Group").property(3).property("ADBE Vector Trim End").keys]`),[false,[[0.25,0],[0.75,100]]]);
 });
 test("second-copy write failure removes both copies and restores sources / selection / Undo",()=>{
-  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A"),b=source(c,"B");c.failWrite="B";var error="";try{PedroStrokeHost.create(c,[a,b],{hideOriginal:true});}catch(e){error=e.toString();}[error.indexOf("injected")>=0,c.numLayers,a.enabled,b.enabled,a.selected,b.selected,app.groups]`),[true,2,true,true,true,true,0]);
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A"),b=source(c,"B");c.failWrite="B";var error="";try{PedroStrokeHost.create(c,[a,b],{originalAction:"disable"});}catch(e){error=e.toString();}[error.indexOf("injected")>=0,c.numLayers,a.enabled,b.enabled,a.selected,b.selected,app.groups]`),[true,2,true,true,true,true,0]);
+});
+test("explicit delete removes only originals after verified replacements",()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A"),b=source(c,"B");var copies=PedroStrokeHost.create(c,[a,b],{originalAction:"delete"});[c.numLayers,c.layers.indexOf(a),c.layers.indexOf(b),copies[0].selected,copies[1].selected,app.groups]`),[2,-1,-1,true,true,0]);
+});
+test("write failure in delete mode leaves every original intact",()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A"),b=source(c,"B");c.failWrite="B";try{PedroStrokeHost.create(c,[a,b],{originalAction:"delete"});}catch(e){}[c.numLayers,c.layers.indexOf(a)>=0,c.layers.indexOf(b)>=0,a.enabled,b.enabled,app.groups]`),[2,true,true,true,true,0]);
+});
+test("partial deletion failure preserves both replacements and demands Undo",()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A"),b=source(c,"B");c.failRemove="A";var error="";try{PedroStrokeHost.create(c,[a,b],{originalAction:"delete"});}catch(e){error=e.toString();}[c.numLayers,c.layers.indexOf(a)>=0,c.layers.indexOf(b)>=0,c.layers.filter(function(l){return l.name.indexOf("[Centerline]")>=0;}).length,error.indexOf("use Undo immediately")>=0,app.groups]`),[3,true,false,2,true,0]);
+});
+test("parenting dependency blocks deleting the original, but keeping disabled is supported",()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A"),child=source(c,"Child");child.parent=a;var error="";try{PedroStrokeHost.create(c,[a],{originalAction:"delete"});}catch(e){error=e.toString();}var count=c.numLayers;PedroStrokeHost.create(c,[a],{originalAction:"disable"});[error.indexOf("parents another layer")>=0,count,c.numLayers,child.parent===a,a.enabled,app.groups]`),[true,2,3,true,false,0]);
+});
+test("invalid original action is rejected before mutation",()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A"),error=false;try{PedroStrokeHost.create(c,[a],{originalAction:"oops"});}catch(e){error=true;}[error,c.numLayers,a.enabled,app.groups]`),[true,1,true,0]);
 });
 test("unsupported layer cancels the entire batch before edits",()=>{
   const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A"),b=source(c,"B");b.property("ADBE Root Vectors Group").addProperty("ADBE Vector Graphic - Stroke");var error=false;try{PedroStrokeHost.create(c,[a,b],{});}catch(e){error=true;}[error,c.numLayers,a.enabled,b.enabled,app.groups]`),[true,2,true,true,0]);

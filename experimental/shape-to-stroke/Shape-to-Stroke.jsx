@@ -1,4 +1,4 @@
-// Shape to Stroke 0.0.1-prototype — Pedro Mafra
+// Shape to Stroke 0.0.2-prototype — Pedro Mafra
 // MIT License. Local experimental build; not part of the public beta.
 (function () {
 // Pure ES3 geometry. No AE objects, mutations or external dependencies.
@@ -233,11 +233,14 @@ var PedroStrokeHost = (function () {
         if(check.closed || check.vertices.length!==2 || c.numProperties!==3 || Math.abs(actualWidth-plan.geometry.width)>Math.max(0.0001,plan.geometry.width*0.00001)) fail("Generated geometry verification failed.");
         for(i=0;i<2;i++) for(var d=0;d<2;d++) if(Math.abs(check.vertices[i][d]-vertices[i][d])>Math.max(0.0001,Math.abs(vertices[i][d])*0.00001)) fail("Generated path point verification failed.");
         copy.name=unique(comp,plan.name+" [Centerline]");
-        copy.comment="Shape to Stroke prototype; original layer retained. "+plan.geometry.kind+"; local sampled fit error "+plan.geometry.fitError;
+        copy.comment="Shape to Stroke prototype; original action: "+options.originalAction+". "+plan.geometry.kind+"; local sampled fit error "+plan.geometry.fitError;
     }
     function create(comp,layers,options) {
         if(!layers.length || layers.length>25) fail("Select 1–25 source layers.");
         options=options || {};
+        var action=options.originalAction || "disable";
+        if(action!=="disable" && action!=="delete") fail("Original action must be disable or delete.");
+        options={originalAction:action,reverse:options.reverse,animate:options.animate,frames:options.frames};
         if(options.animate && (!/^[1-9][0-9]*$/.test(String(options.frames)) || Number(options.frames)>10000)) fail("Draw-on duration must be 1–10000 whole frames.");
         var results=analyze(layers),plans=[],i;
         for(i=0;i<results.length;i++) {
@@ -245,26 +248,38 @@ var PedroStrokeHost = (function () {
             var plan=results[i].plan;
             if(plan.layer.containingComp!==comp) fail("Every source layer must belong to the target composition.");
             for(var prior=0;prior<plans.length;prior++) if(plans[prior].layer===plan.layer) fail("Duplicate source layer in the conversion request.");
+            if(action==="delete") for(var li=1;li<=comp.numLayers;li++) {
+                if(comp.layer(li).parent===plan.layer) fail("Cannot delete "+plan.name+": it parents another layer. Keep disabled instead.");
+            }
             if(options.animate && (comp.time<plan.layer.inPoint || comp.time+Number(options.frames)*comp.frameDuration>Math.min(comp.duration,plan.layer.outPoint))) fail("Draw-on keys must fit within the visible source layer and composition.");
             plans.push(plan);
         }
-        var selection=comp.selectedLayers,copies=[],recovery=[];
-        app.beginUndoGroup("Shape to Stroke — Test Copies");
+        var selection=comp.selectedLayers,copies=[],recovery=[],deletionStarted=false,succeeded=false;
+        app.beginUndoGroup("Shape to Stroke");
         try {
             for(i=0;i<plans.length;i++) {
                 var copy=plans[i].layer.duplicate();copies.push(copy);
                 write(copy,plans[i],options,comp);
             }
-            if(options.hideOriginal) for(i=0;i<plans.length;i++) plans[i].layer.enabled=false;
+            if(action==="delete") {
+                // Only remove exact captured originals after ALL replacements passed verification.
+                // After the first deletion, preserve replacements on failure; automatic cleanup
+                // could otherwise destroy the only remaining copy of an already deleted source.
+                deletionStarted=true;
+                for(i=plans.length-1;i>=0;i--) plans[i].layer.remove();
+            } else for(i=0;i<plans.length;i++) plans[i].layer.enabled=false;
+            succeeded=true;
         } catch(error) {
+            if(deletionStarted) fail(error.toString()+"\nOriginal deletion incomplete. Replacements were kept; use Undo immediately.");
             for(i=copies.length-1;i>=0;i--) {try{copies[i].remove();}catch(e){recovery.push(e.toString());}}
             for(i=0;i<plans.length;i++) {try{plans[i].layer.enabled=plans[i].enabled;}catch(e){recovery.push(e.toString());}}
             if(recovery.length) fail(error.toString()+"\nRecovery incomplete. Undo immediately: "+recovery.join("; "));
             throw error;
         } finally {
-            // Selection restoration is best-effort UI state; source geometry is never rewritten.
-            for(i=0;i<copies.length;i++) {try{copies[i].selected=false;}catch(e){}}
+            // Restore selection on failure; select replacements on success, not hidden sources.
             for(i=0;i<selection.length;i++) {try{selection[i].selected=true;}catch(e){}}
+            if(succeeded) for(i=0;i<plans.length;i++) {try{plans[i].layer.selected=false;}catch(e){}}
+            for(i=0;i<copies.length;i++) {try{copies[i].selected=succeeded || deletionStarted;}catch(e){}}
             app.endUndoGroup();
         }
         return copies;
@@ -275,34 +290,23 @@ var PedroStrokeHost = (function () {
 function showStrokePrototype() {
     var comp=app.project && app.project.activeItem;
     if(!(comp instanceof CompItem)) {alert("Open a composition and select source shape layers.");return;}
-    var win=new Window("dialog","Shape to Stroke — Local Prototype");
+    var win=new Window("dialog","Shape to Stroke");
     win.orientation="column";win.alignChildren=["fill","top"];
-    win.add("statictext",undefined,"Rectangles / uniform capsules only. Save a project copy before testing.");
-    var report=win.add("edittext",undefined,"",{multiline:true,readonly:true,scrolling:true});report.preferredSize=[650,220];
-    var reverse=win.add("checkbox",undefined,"Reverse reveal direction");
-    var animate=win.add("checkbox",undefined,"Add linear draw-on keys at current time");
-    var duration=win.add("group");duration.add("statictext",undefined,"Duration (whole frames):");
-    var frames=duration.add("edittext",undefined,"12");frames.characters=6;
-    var hide=win.add("checkbox",undefined,"Hide originals after successful copy (Undo restores visibility)");
-    win.add("statictext",undefined,"Unchecked: originals remain visible and overlap copies. Toggle visibility manually to compare.");
-    var buttons=win.add("group"),inspect=buttons.add("button",undefined,"Analyze"),create=buttons.add("button",undefined,"Create Test Copies");
-    buttons.add("button",undefined,"Close",{name:"cancel"});
-    function refresh() {
-        var results=PedroStrokeHost.analyze(comp.selectedLayers),lines=[];
-        for(var i=0;i<results.length;i++) {
-            var r=results[i];
-            lines.push(r.ok ? "READY — "+r.name+": "+r.plan.geometry.kind+", width "+r.plan.geometry.width.toFixed(3)+", path length "+r.plan.geometry.pathLength.toFixed(3)+", fit error "+r.plan.geometry.fitError.toFixed(5) : "SKIP — "+r.name+": "+r.reason);
-        }
-        report.text=lines.length ? lines.join("\n\n") : "Select at least one shape layer before launching.";
-    }
-    inspect.onClick=function(){try{refresh();}catch(e){alert(e.toString());}};
+    var original=win.add("group");
+    original.add("statictext",undefined,"Original:");
+    var action=original.add("dropdownlist",undefined,["Keep disabled","Delete"]);action.selection=0;
+    var animate=win.add("checkbox",undefined,"Animate Trim Paths");
+    var reverse=win.add("checkbox",undefined,"Reverse");
+    var buttons=win.add("group");buttons.alignment="right";
+    var create=buttons.add("button",undefined,"Create",{name:"ok"});
+    buttons.add("button",undefined,"Cancel",{name:"cancel"});
     create.onClick=function(){
         try {
-            var copies=PedroStrokeHost.create(comp,comp.selectedLayers,{reverse:reverse.value,animate:animate.value,frames:frames.text,hideOriginal:hide.value});
-            alert("Created "+copies.length+" test copies above their originals.\n"+(hide.value ? "Originals are hidden, not deleted." : "Originals are still visible: toggle their visibility to inspect the reveal.")+"\nOne Undo reverses the operation.");win.close();
+            PedroStrokeHost.create(comp,comp.selectedLayers,{reverse:reverse.value,animate:animate.value,frames:12,originalAction:action.selection.index===1 ? "delete" : "disable"});
+            win.close(1);
         } catch(e) {alert(e.toString());}
     };
-    refresh();win.center();win.show();
+    win.center();win.show();
 }
 showStrokePrototype();
 

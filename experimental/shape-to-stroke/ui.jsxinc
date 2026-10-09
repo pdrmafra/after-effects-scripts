@@ -1,33 +1,22 @@
 function showStrokePrototype() {
     var comp=app.project && app.project.activeItem;
     if(!(comp instanceof CompItem)) {alert("Open a composition and select source shape layers.");return;}
-    var win=new Window("dialog","Shape to Stroke — Local Prototype");
+    var win=new Window("dialog","Shape to Stroke");
     win.orientation="column";win.alignChildren=["fill","top"];
-    win.add("statictext",undefined,"Rectangles / uniform capsules only. Save a project copy before testing.");
-    var report=win.add("edittext",undefined,"",{multiline:true,readonly:true,scrolling:true});report.preferredSize=[650,220];
-    var reverse=win.add("checkbox",undefined,"Reverse reveal direction");
-    var animate=win.add("checkbox",undefined,"Add linear draw-on keys at current time");
-    var duration=win.add("group");duration.add("statictext",undefined,"Duration (whole frames):");
-    var frames=duration.add("edittext",undefined,"12");frames.characters=6;
-    var hide=win.add("checkbox",undefined,"Hide originals after successful copy (Undo restores visibility)");
-    win.add("statictext",undefined,"Unchecked: originals remain visible and overlap copies. Toggle visibility manually to compare.");
-    var buttons=win.add("group"),inspect=buttons.add("button",undefined,"Analyze"),create=buttons.add("button",undefined,"Create Test Copies");
-    buttons.add("button",undefined,"Close",{name:"cancel"});
-    function refresh() {
-        var results=PedroStrokeHost.analyze(comp.selectedLayers),lines=[];
-        for(var i=0;i<results.length;i++) {
-            var r=results[i];
-            lines.push(r.ok ? "READY — "+r.name+": "+r.plan.geometry.kind+", width "+r.plan.geometry.width.toFixed(3)+", path length "+r.plan.geometry.pathLength.toFixed(3)+", fit error "+r.plan.geometry.fitError.toFixed(5) : "SKIP — "+r.name+": "+r.reason);
-        }
-        report.text=lines.length ? lines.join("\n\n") : "Select at least one shape layer before launching.";
-    }
-    inspect.onClick=function(){try{refresh();}catch(e){alert(e.toString());}};
+    var original=win.add("group");
+    original.add("statictext",undefined,"Original:");
+    var action=original.add("dropdownlist",undefined,["Keep disabled","Delete"]);action.selection=0;
+    var animate=win.add("checkbox",undefined,"Animate Trim Paths");
+    var reverse=win.add("checkbox",undefined,"Reverse");
+    var buttons=win.add("group");buttons.alignment="right";
+    var create=buttons.add("button",undefined,"Create",{name:"ok"});
+    buttons.add("button",undefined,"Cancel",{name:"cancel"});
     create.onClick=function(){
         try {
-            var copies=PedroStrokeHost.create(comp,comp.selectedLayers,{reverse:reverse.value,animate:animate.value,frames:frames.text,hideOriginal:hide.value});
-            alert("Created "+copies.length+" test copies above their originals.\n"+(hide.value ? "Originals are hidden, not deleted." : "Originals are still visible: toggle their visibility to inspect the reveal.")+"\nOne Undo reverses the operation.");win.close();
+            PedroStrokeHost.create(comp,comp.selectedLayers,{reverse:reverse.value,animate:animate.value,frames:12,originalAction:action.selection.index===1 ? "delete" : "disable"});
+            win.close(1);
         } catch(e) {alert(e.toString());}
     };
-    refresh();win.center();win.show();
+    win.center();win.show();
 }
 showStrokePrototype();
