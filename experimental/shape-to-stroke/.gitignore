@@ -1,0 +1,6 @@
+native-results.txt
+*-before.png
+*-after.png
+motion-*.png
+comparison-sheet.png
+__pycache__/

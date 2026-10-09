@@ -1,0 +1,30 @@
+var PedroStrokeFixtures = (function () {
+    function toShape(data) {var s=new Shape();s.vertices=data.vertices;s.inTangents=data.inTangents;s.outTangents=data.outTangents;s.closed=data.closed;return s;}
+    function source(comp,name,parametric,rounded,angle,nested) {
+        var layer=comp.layers.addShape();layer.name=name;
+        var contents=layer.property("ADBE Root Vectors Group"),chain=[];
+        var outer=contents.addProperty("ADBE Vector Group");outer.name="Imported outline";chain.push(outer.propertyIndex);
+        if(nested) {
+            outer.property("ADBE Vector Transform Group").property("ADBE Vector Rotation").setValue(17);
+            outer.property("ADBE Vector Transform Group").property("ADBE Vector Scale").setValue([120,80]);
+            var inner=outer.property("ADBE Vectors Group").addProperty("ADBE Vector Group");inner.name="Nested";chain.push(inner.propertyIndex);
+        }
+        contents=PedroStrokeHost.contentsAt(layer,chain);
+        if(parametric) {
+            var rect=contents.addProperty("ADBE Vector Shape - Rect");
+            rect.property("ADBE Vector Rect Size").setValue([200,20]);
+            rect.property("ADBE Vector Rect Position").setValue([10,-5]);
+            rect.property("ADBE Vector Rect Roundness").setValue(rounded ? 10 : 0);
+            var group=layer.property("ADBE Root Vectors Group").property(chain[0]);
+            group.property("ADBE Vector Transform Group").property("ADBE Vector Rotation").setValue(angle);
+        } else {
+            var path=contents.addProperty("ADBE Vector Shape - Group");
+            path.property("ADBE Vector Shape").setValue(toShape(PedroStrokeGeometry.fixture(200,20,rounded,angle,[10,-5])));
+        }
+        var fill=PedroStrokeHost.contentsAt(layer,chain).addProperty("ADBE Vector Graphic - Fill");
+        fill.property("ADBE Vector Fill Color").setValue([0.1,0.7,0.9,1]);
+        fill.property("ADBE Vector Fill Opacity").setValue(73);
+        return {layer:layer,chain:chain};
+    }
+    return {source:source,toShape:toShape};
+}());

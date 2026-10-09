@@ -1,0 +1,143 @@
+// Conservative AE adapter. Snapshot -> recognition -> preflight -> duplicate-only edits.
+var PedroStrokeHost = (function () {
+    function fail(message) { throw new Error(message); }
+    function expressions(p) {
+        if(p.propertyType===PropertyType.PROPERTY) {
+            if(p.canSetExpression && p.expression) fail("Expressions on the source layer are not supported.");
+        } else for(var i=1;i<=p.numProperties;i++) expressions(p.property(i));
+    }
+    function staticTree(p) {
+        if(p.propertyType===PropertyType.PROPERTY) {
+            if(p.numKeys>0) fail("Animated shape geometry, group transforms or styles are not supported.");
+        } else for(var i=1;i<=p.numProperties;i++) staticTree(p.property(i));
+    }
+    function leaf(contents,chain) {
+        var groups=[],paths=[],fills=[];
+        for(var i=1;i<=contents.numProperties;i++) {
+            var p=contents.property(i),m=p.matchName;
+            if(p.enabled===false) fail("Disabled shape attributes are not supported.");
+            if(m==="ADBE Vector Group") groups.push(p);
+            else if(m==="ADBE Vector Shape - Rect" || m==="ADBE Vector Shape - Group") paths.push(p);
+            else if(m==="ADBE Vector Graphic - Fill") fills.push(p);
+            else fail("Unsupported shape attribute: "+p.name+" ("+m+").");
+        }
+        if(groups.length===1 && !paths.length && !fills.length) {
+            var group=groups[0],blend=group.property("ADBE Vector Blend Mode");
+            if(blend && blend.value!==1) fail("Non-normal group blend mode is not supported.");
+            return leaf(group.property("ADBE Vectors Group"),chain.concat([group.propertyIndex]));
+        }
+        if(groups.length || paths.length!==1 || fills.length!==1) fail("Select a layer with exactly one path and one solid fill, optionally inside a single nested group chain.");
+        var fillBlend=fills[0].property("ADBE Vector Blend Mode");
+        if(fillBlend && fillBlend.value!==1) fail("Non-normal fill blend mode is not supported.");
+        return {chain:chain,path:paths[0],fill:fills[0]};
+    }
+    function snapshot(layer) {
+        if(!layer || layer.matchName!=="ADBE Vector Layer") fail("Select a shape layer.");
+        if(layer.locked || layer.threeDLayer || layer.adjustmentLayer || !layer.enabled) fail("Source must be an enabled, unlocked, non-adjustment 2D shape layer.");
+        if(layer.blendingMode!==BlendingMode.NORMAL) fail("Only normal layer blending is supported.");
+        if(layer.hasTrackMatte || layer.isTrackMatte) fail("Track matte layers are not supported.");
+        if(layer.property("ADBE Effect Parade").numProperties || layer.property("ADBE Mask Parade").numProperties) fail("Layers with effects or masks are not supported.");
+        var styles=layer.property("ADBE Layer Styles");
+        if(styles) for(var si=1;si<=styles.numProperties;si++) {
+            var style=styles.property(si);
+            if(style.propertyType!==PropertyType.PROPERTY && style.enabled===true) fail("Enabled layer styles are not supported.");
+        }
+        expressions(layer);
+        var contents=layer.property("ADBE Root Vectors Group");
+        staticTree(contents);
+        var found=leaf(contents,[]),source=found.path,geometry;
+        if(source.matchName==="ADBE Vector Shape - Rect") geometry=PedroStrokeGeometry.rectangle(
+            source.property("ADBE Vector Rect Size").value,source.property("ADBE Vector Rect Position").value,source.property("ADBE Vector Rect Roundness").value);
+        else geometry=PedroStrokeGeometry.recognize(source.property("ADBE Vector Shape").value);
+        return {layer:layer,chain:found.chain,geometry:geometry,color:found.fill.property("ADBE Vector Fill Color").value,
+            opacity:found.fill.property("ADBE Vector Fill Opacity").value,enabled:layer.enabled,name:layer.name};
+    }
+    function analyze(layers) {
+        var result=[];
+        for(var i=0;i<layers.length;i++) {
+            try { result.push({ok:true,plan:snapshot(layers[i]),name:layers[i].name}); }
+            catch(error) { result.push({ok:false,name:layers[i].name,reason:error.toString()}); }
+        }
+        return result;
+    }
+    function contentsAt(layer,chain) {
+        var c=layer.property("ADBE Root Vectors Group");
+        for(var i=0;i<chain.length;i++) c=c.property(chain[i]).property("ADBE Vectors Group");
+        return c;
+    }
+    function shape(vertices) {
+        var s=new Shape();s.vertices=vertices;s.inTangents=[[0,0],[0,0]];s.outTangents=[[0,0],[0,0]];s.closed=false;return s;
+    }
+    function unique(comp,base) {
+        var name=base,n=2,exists=true;
+        while(exists) {
+            exists=false;
+            for(var i=1;i<=comp.numLayers;i++) if(comp.layer(i).name===name) {exists=true;break;}
+            if(exists) name=base+" "+n++;
+        }
+        return name;
+    }
+    function write(copy,plan,options,comp) {
+        var c=contentsAt(copy,plan.chain);
+        for(var i=c.numProperties;i>=1;i--) c.property(i).remove();
+        var path=c.addProperty("ADBE Vector Shape - Group");path.name="Recovered Centerline";
+        var vertices=plan.geometry.vertices;
+        if(options.reverse) vertices=[vertices[1],vertices[0]];
+        path.property("ADBE Vector Shape").setValue(shape(vertices));
+        // Indexed groups invalidate property handles after addProperty: reacquire each time.
+        var stroke=contentsAt(copy,plan.chain).addProperty("ADBE Vector Graphic - Stroke");
+        stroke.property("ADBE Vector Stroke Width").setValue(plan.geometry.width);
+        stroke.property("ADBE Vector Stroke Color").setValue(plan.color);
+        stroke.property("ADBE Vector Stroke Opacity").setValue(plan.opacity);
+        stroke.property("ADBE Vector Stroke Line Cap").setValue(plan.geometry.cap);
+        var trim=contentsAt(copy,plan.chain).addProperty("ADBE Vector Filter - Trim");
+        var end=trim.property("ADBE Vector Trim End");
+        if(options.animate) {
+            end.setValueAtTime(comp.time,0);end.setValueAtTime(comp.time+options.frames*comp.frameDuration,100);
+            end.setInterpolationTypeAtKey(1,KeyframeInterpolationType.LINEAR,KeyframeInterpolationType.LINEAR);
+            end.setInterpolationTypeAtKey(2,KeyframeInterpolationType.LINEAR,KeyframeInterpolationType.LINEAR);
+        } else end.setValue(100);
+        c=contentsAt(copy,plan.chain);
+        var check=c.property(1).property("ADBE Vector Shape").value;
+        var actualWidth=c.property(2).property("ADBE Vector Stroke Width").value;
+        if(check.closed || check.vertices.length!==2 || c.numProperties!==3 || Math.abs(actualWidth-plan.geometry.width)>Math.max(0.0001,plan.geometry.width*0.00001)) fail("Generated geometry verification failed.");
+        for(i=0;i<2;i++) for(var d=0;d<2;d++) if(Math.abs(check.vertices[i][d]-vertices[i][d])>Math.max(0.0001,Math.abs(vertices[i][d])*0.00001)) fail("Generated path point verification failed.");
+        copy.name=unique(comp,plan.name+" [Centerline]");
+        copy.comment="Shape to Stroke prototype; original layer retained. "+plan.geometry.kind+"; local sampled fit error "+plan.geometry.fitError;
+    }
+    function create(comp,layers,options) {
+        if(!layers.length || layers.length>25) fail("Select 1–25 source layers.");
+        options=options || {};
+        if(options.animate && (!/^[1-9][0-9]*$/.test(String(options.frames)) || Number(options.frames)>10000)) fail("Draw-on duration must be 1–10000 whole frames.");
+        var results=analyze(layers),plans=[],i;
+        for(i=0;i<results.length;i++) {
+            if(!results[i].ok) fail(results[i].name+": "+results[i].reason+"\nNo copies were created. Select only supported layers.");
+            var plan=results[i].plan;
+            if(plan.layer.containingComp!==comp) fail("Every source layer must belong to the target composition.");
+            for(var prior=0;prior<plans.length;prior++) if(plans[prior].layer===plan.layer) fail("Duplicate source layer in the conversion request.");
+            if(options.animate && (comp.time<plan.layer.inPoint || comp.time+Number(options.frames)*comp.frameDuration>Math.min(comp.duration,plan.layer.outPoint))) fail("Draw-on keys must fit within the visible source layer and composition.");
+            plans.push(plan);
+        }
+        var selection=comp.selectedLayers,copies=[],recovery=[];
+        app.beginUndoGroup("Shape to Stroke — Test Copies");
+        try {
+            for(i=0;i<plans.length;i++) {
+                var copy=plans[i].layer.duplicate();copies.push(copy);
+                write(copy,plans[i],options,comp);
+            }
+            if(options.hideOriginal) for(i=0;i<plans.length;i++) plans[i].layer.enabled=false;
+        } catch(error) {
+            for(i=copies.length-1;i>=0;i--) {try{copies[i].remove();}catch(e){recovery.push(e.toString());}}
+            for(i=0;i<plans.length;i++) {try{plans[i].layer.enabled=plans[i].enabled;}catch(e){recovery.push(e.toString());}}
+            if(recovery.length) fail(error.toString()+"\nRecovery incomplete. Undo immediately: "+recovery.join("; "));
+            throw error;
+        } finally {
+            // Selection restoration is best-effort UI state; source geometry is never rewritten.
+            for(i=0;i<copies.length;i++) {try{copies[i].selected=false;}catch(e){}}
+            for(i=0;i<selection.length;i++) {try{selection[i].selected=true;}catch(e){}}
+            app.endUndoGroup();
+        }
+        return copies;
+    }
+    return {snapshot:snapshot,analyze:analyze,create:create,contentsAt:contentsAt};
+}());
