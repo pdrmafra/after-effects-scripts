@@ -2,7 +2,7 @@
 const fs=require("node:fs"),vm=require("node:vm"),test=require("node:test"),assert=require("node:assert/strict");
 function evaluate(source) {
   const c=vm.createContext({});
-  for(const f of ["circular.jsxinc","geometry.jsxinc"])vm.runInContext(fs.readFileSync(__dirname+"/"+f,"utf8"),c);
+  for(const f of ["circular.jsxinc","outlines.jsxinc","geometry.jsxinc"])vm.runInContext(fs.readFileSync(__dirname+"/"+f,"utf8"),c);
   return JSON.parse(JSON.stringify(vm.runInContext(source,c)));
 }
 function near(a,b) { assert.ok(Math.abs(a-b)<1e-7,`${a} != ${b}`); }

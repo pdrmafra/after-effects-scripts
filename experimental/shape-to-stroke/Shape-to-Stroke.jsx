@@ -1,4 +1,4 @@
-// Shape to Stroke 0.0.4-prototype — Pedro Mafra
+// Shape to Stroke 0.0.5-prototype — Pedro Mafra
 // MIT License. Local experimental build; not part of the public beta.
 (function () {
 // Pure ES3: circular cubic contours only. Not a general centerline/skeleton solver.
@@ -90,6 +90,37 @@ var PedroStrokeCircular = (function () {
         }
         return centerline(outer,(outer.radius+inner.radius)/2,width,false,"circular arc / butt caps (sampled fit)",Math.max(a.error,b.error));
     }
+    function roundArc(input) {
+        var s=normalize(input),groups=[],n=s.vertices.length;
+        function same(a,b){return length(sub(a.center,b.center))<Math.max(0.002,a.radius*0.00001) && Math.abs(a.radius-b.radius)<Math.max(0.002,a.radius*0.00001);}
+        for(var i=0;i<n;i++) {
+            if(straight(s,i))fail("Round-ended arc must contain only circular cubic segments.");
+            var part=fit(s,[i],false),last=groups.length ? groups[groups.length-1] : null;
+            if(last && same(last.circle,part))last.edges.push(i);else groups.push({circle:part,edges:[i]});
+        }
+        if(groups.length>1 && same(groups[0].circle,groups[groups.length-1].circle)) {
+            groups[0].edges=groups[groups.length-1].edges.concat(groups[0].edges);groups.pop();
+        }
+        if(groups.length!==4)fail("Round-ended arc needs two arc boundaries and two semicircular caps.");
+        for(i=0;i<4;i++)groups[i].circle=fit(s,groups[i].edges,false);
+        for(i=0;i<2;i++) {
+            var a=groups[i].circle,b=groups[i+2].circle,outer=a.radius>b.radius ? a : b,inner=outer===a ? b : a,width=outer.radius-inner.radius;
+            var caps=[groups[(i+1)%4].circle,groups[(i+3)%4].circle],tol=Math.max(0.003,width*0.0001);
+            if(width<EPS || length(sub(a.center,b.center))>tol || Math.abs(a.sweep+b.sweep)>0.00001)continue;
+            var model=centerline(outer,(outer.radius+inner.radius)/2,width,false,"circular arc / round caps (sampled fit)",Math.max(a.error,b.error));
+            var start=model.vertices[0],end=model.vertices[model.vertices.length-1];
+            if(length(sub(start,end))<=width+tol)continue;
+            var good=true;
+            for(var c=0;c<2;c++) {
+                if(Math.abs(caps[c].radius-width/2)>tol || Math.abs(Math.abs(caps[c].sweep)-Math.PI)>0.00001 || caps[c].sweep*outer.sweep<=0)good=false;
+                model.fitError=Math.max(model.fitError,caps[c].error);
+            }
+            var direct=length(sub(caps[0].center,start))<=tol && length(sub(caps[1].center,end))<=tol;
+            var swapped=length(sub(caps[1].center,start))<=tol && length(sub(caps[0].center,end))<=tol;
+            if(good && (direct || swapped)) {PedroStrokeOutlines.simpleShape(s);model.cap=2;return model;}
+        }
+        fail("Round arc boundaries/caps are not a single constant-width stroke.");
+    }
     function path(model,reverse) {
         var result={vertices:[],inTangents:[],outTangents:[],closed:!!model.closed},n=model.vertices.length;
         for(var i=0;i<n;i++) {
@@ -101,7 +132,180 @@ var PedroStrokeCircular = (function () {
         }
         return result;
     }
-    return {ring:ring,arc:arc,path:path};
+    return {ring:ring,arc:arc,roundArc:roundArc,path:path,segment:function(s,i){return fit(s,[i],false);}};
+}());
+
+// Pure ES3: matched uniform offsets. Reject ambiguity, overlaps and changing width.
+var PedroStrokeOutlines = (function () {
+    var EPS=0.000001;
+    function fail(m){throw new Error(m);}
+    function add(a,b){return [a[0]+b[0],a[1]+b[1]];}
+    function sub(a,b){return [a[0]-b[0],a[1]-b[1]];}
+    function mul(a,k){return [a[0]*k,a[1]*k];}
+    function dot(a,b){return a[0]*b[0]+a[1]*b[1];}
+    function cross(a,b){return a[0]*b[1]-a[1]*b[0];}
+    function length(a){return Math.sqrt(dot(a,a));}
+    function unit(a){var n=length(a);if(n<EPS || !isFinite(n))fail("Degenerate/non-finite outline edge.");return mul(a,1/n);}
+    function straight(s,i){var j=(i+1)%s.vertices.length;return length(s.outTangents[i])<EPS && length(s.inTangents[j])<EPS;}
+    function normalize(input) {
+        var n=input && input.vertices && input.vertices.length,out={vertices:[],inTangents:[],outTangents:[],closed:true},i,f;
+        if(!input || !input.closed || !n || n<3 || n>64 || !input.inTangents || !input.outTangents || input.inTangents.length!==n || input.outTangents.length!==n)fail("Expected a closed 3–64 vertex outline with matching tangent arrays.");
+        for(i=0;i<n;i++)for(f=0;f<3;f++){
+            var key=["vertices","inTangents","outTangents"][f],p=input[key][i];
+            if(!p || p.length!==2 || typeof p[0]!=="number" || typeof p[1]!=="number" || !isFinite(p[0]) || !isFinite(p[1]))fail("Invalid/non-finite outline point.");
+            out[key].push(p.slice(0));
+        }
+        // Exact straight-segment normalization: handles must stay collinear,
+        // inside the chord, and ordered. Never flatten a bowed or reversing cubic.
+        for(i=0;i<n;i++) {
+            var j=(i+1)%n,e=sub(out.vertices[j],out.vertices[i]),span=length(e);
+            if(!isFinite(span))fail("Non-finite outline scale.");
+            if(span<EPS)continue;
+            var axis=unit(e),a=out.outTangents[i],b=add(e,out.inTangents[j]);
+            var x=dot(a,axis),y=dot(b,axis),tol=EPS*Math.max(1,span);
+            if(Math.abs(cross(axis,a))<=tol && Math.abs(cross(axis,b))<=tol && x>=-tol && y>=x-tol && y<=span+tol){out.outTangents[i]=[0,0];out.inTangents[j]=[0,0];}
+        }
+        function remove(index){out.vertices.splice(index,1);out.inTangents.splice(index,1);out.outTangents.splice(index,1);}
+        var changed=true;
+        while(changed && out.vertices.length>=3) {
+            changed=false;n=out.vertices.length;
+            for(i=0;i<n;i++) {
+                j=(i+1)%n;
+                if(length(sub(out.vertices[i],out.vertices[j]))<EPS && straight(out,i)) {
+                    out.outTangents[i]=out.outTangents[j];remove(j);changed=true;break;
+                }
+                var previous=(i+n-1)%n;
+                if(straight(out,previous) && straight(out,i)) {
+                    var before=sub(out.vertices[i],out.vertices[previous]),after=sub(out.vertices[j],out.vertices[i]);
+                    if(length(before)>EPS && length(after)>EPS && dot(unit(before),unit(after))>0.9999999999){remove(i);changed=true;break;}
+                }
+            }
+        }
+        if(out.vertices.length<3)fail("Degenerate outline after normalization.");
+        return out;
+    }
+    function samples(s) {
+        var pts=[],n=s.vertices.length,limit=s.closed ? n : n-1;
+        for(var i=0;i<limit;i++) {
+            var j=(i+1)%n,p=s.vertices[i],q=s.vertices[j];pts.push(p);
+            if(!straight(s,i))for(var k=1;k<16;k++){
+                var t=k/16,u=1-t;
+                pts.push(add(add(mul(p,u*u*u),mul(add(p,s.outTangents[i]),3*u*u*t)),add(mul(add(q,s.inTangents[j]),3*u*t*t),mul(q,t*t*t))));
+            }
+        }
+        if(!s.closed)pts.push(s.vertices[n-1]);return pts;
+    }
+    function area(pts){var a=0,origin=pts[0];for(var i=0;i<pts.length;i++)a+=cross(sub(pts[i],origin),sub(pts[(i+1)%pts.length],origin));if(!isFinite(a) || Math.abs(a)<EPS)fail("Degenerate outline area.");return a/2;}
+    function onSegment(p,a,b){var v=sub(b,a),w=sub(p,a);return Math.abs(cross(v,w))<=EPS*Math.max(1,length(v)) && dot(w,v)>=-EPS && dot(sub(p,b),v)<=EPS;}
+    function intersects(a,b,c,d) {
+        if(Math.max(a[0],b[0])+EPS<Math.min(c[0],d[0]) || Math.max(c[0],d[0])+EPS<Math.min(a[0],b[0]) || Math.max(a[1],b[1])+EPS<Math.min(c[1],d[1]) || Math.max(c[1],d[1])+EPS<Math.min(a[1],b[1]))return false;
+        var ab=sub(b,a),cd=sub(d,c),x=cross(ab,sub(c,a)),y=cross(ab,sub(d,a)),z=cross(cd,sub(a,c)),w=cross(cd,sub(b,c));
+        return (x*y<0 && z*w<0) || onSegment(c,a,b) || onSegment(d,a,b) || onSegment(a,c,d) || onSegment(b,c,d);
+    }
+    function simple(pts,closed) {
+        var count=closed ? pts.length : pts.length-1;
+        for(var i=0;i<count;i++)for(var j=i+1;j<count;j++) {
+            if(j===i+1 || (closed && i===0 && j===count-1))continue;
+            if(intersects(pts[i],pts[(i+1)%pts.length],pts[j],pts[(j+1)%pts.length]))fail("Crossing/touching outlines or overlapping centerlines are not supported.");
+        }
+    }
+    function inside(p,pts) {
+        var yes=false;
+        for(var i=0,j=pts.length-1;i<pts.length;j=i++) {
+            var a=pts[i],b=pts[j];if(onSegment(p,a,b))return false;
+            if((a[1]>p[1])!==(b[1]>p[1]) && p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])yes=!yes;
+        }
+        return yes;
+    }
+    function descriptors(s) {
+        var out=[],n=s.vertices.length,limit=s.closed ? n : n-1;
+        for(var i=0;i<limit;i++)out.push(straight(s,i) ? {line:true,axis:unit(sub(s.vertices[(i+1)%n],s.vertices[i]))} : {line:false,circle:PedroStrokeCircular.segment(s,i),axis:unit(s.outTangents[i])});
+        return out;
+    }
+    function match(a,b,da,db,orientation,kind) {
+        var n=a.vertices.length,limit=a.closed ? n : n-1,width=0,error=0,total=0,ratio=1;
+        for(var i=0;i<limit;i++) {
+            var j=(i+1)%n,x=da[i],y=db[i];
+            if(x.line!==y.line || dot(x.axis,y.axis)<0.999999)fail("Boundary segments do not correspond.");
+            var signed=cross(x.axis,sub(b.vertices[i],a.vertices[i]))*orientation;
+            if(!i){width=signed;if(width<=EPS || !isFinite(width))fail("Invalid uniform offset width.");}
+            var tol=Math.max(0.005,width*0.0005);
+            error=Math.max(error,Math.abs(signed-width));if(Math.abs(signed-width)>tol)fail("Outline thickness changes.");
+            if(x.line) {
+                var end=cross(x.axis,sub(b.vertices[j],a.vertices[j]))*orientation;
+                if(Math.abs(end-width)>tol)fail("Outline sides are not parallel uniform offsets.");
+                total+=length(sub(mul(add(a.vertices[j],b.vertices[j]),0.5),mul(add(a.vertices[i],b.vertices[i]),0.5)));
+            } else {
+                var ca=x.circle,cb=y.circle;
+                if(length(sub(ca.center,cb.center))>tol || Math.abs(ca.sweep-cb.sweep)>0.00001 || Math.abs(Math.abs(ca.radius-cb.radius)-width)>tol || dot(unit(sub(a.vertices[i],ca.center)),unit(sub(b.vertices[i],cb.center)))<0.999999)fail("Curved boundaries are not concentric uniform offsets.");
+                total+=Math.abs(ca.sweep)*(ca.radius+cb.radius)/2;error=Math.max(error,ca.error,cb.error);
+            }
+        }
+        var model={vertices:[],inTangents:[],outTangents:[],closed:a.closed,width:width,cap:1,join:1,pathLength:total,totalLength:total,fitError:error,kind:kind};
+        for(i=0;i<n;i++) {
+            model.vertices.push(mul(add(a.vertices[i],b.vertices[i]),0.5));model.inTangents.push(mul(add(a.inTangents[i],b.inTangents[i]),0.5));model.outTangents.push(mul(add(a.outTangents[i],b.outTangents[i]),0.5));
+            ratio=Math.max(ratio,length(sub(a.vertices[i],b.vertices[i]))/width);
+            for(var d=0;d<2;d++)if(!isFinite(model.vertices[i][d]) || !isFinite(model.inTangents[i][d]) || !isFinite(model.outTangents[i][d]))fail("Non-finite recovered centerline.");
+        }
+        if(!isFinite(total) || total<width*1.2 || ratio>50)fail("Short/degenerate centerline or excessive miter extension.");
+        model.miterLimit=Math.max(4,Math.ceil(ratio*2)+1);
+        simple(samples(model),model.closed);
+        // Curves must join tangentially; sharp line-to-curve corners require a
+        // separate join solver, not the midpoint of unrelated control points.
+        for(i=a.closed ? 0 : 1;i<(a.closed ? n : n-1);i++) {
+            var prev=(i+limit-1)%limit,next=i%limit;
+            if(!da[prev].line || !da[next].line) {
+                var incoming=da[prev].line ? da[prev].axis : unit(mul(a.inTangents[i],-1));
+                if(dot(incoming,da[next].axis)<0.999999)fail("Curved joins must be tangent-continuous.");
+            }
+        }
+        return model;
+    }
+    function shifted(s,offset){var r={vertices:[],inTangents:[],outTangents:[],closed:s.closed},n=s.vertices.length;for(var i=0;i<n;i++){var j=(i+offset)%n;r.vertices.push(s.vertices[j]);r.inTangents.push(s.inTangents[j]);r.outTangents.push(s.outTangents[j]);}return r;}
+    function frame(paths,fillRule) {
+        if(paths.length!==2 || (fillRule!==1 && fillRule!==2))fail("A frame requires two contours with a known hole fill rule.");
+        var a=normalize(paths[0]),b=normalize(paths[1]),pa=samples(a),pb=samples(b),aa=area(pa),ab=area(pb);
+        simple(pa,true);simple(pb,true);
+        if(fillRule===1 && aa*ab>0)fail("Same-winding Non-Zero contours produce a filled disk/solid interior, rather than a hollow frame.");
+        var outer=Math.abs(aa)>Math.abs(ab) ? a : b,inner=outer===a ? b : a,op=outer===a ? pa : pb,ip=outer===a ? pb : pa;
+        for(var pi=0;pi<ip.length;pi++)if(!inside(ip[pi],op))fail("Inner contour must lie strictly inside the outer contour.");
+        for(var oi=0;oi<op.length;oi++)for(var ii=0;ii<ip.length;ii++)if(intersects(op[oi],op[(oi+1)%op.length],ip[ii],ip[(ii+1)%ip.length]))fail("Frame contours cross or touch.");
+        if(outer.vertices.length!==inner.vertices.length)fail("Frame boundaries need matching segments after safe normalization.");
+        var orientation=area(op)>0 ? 1 : -1;
+        if(aa*ab<0)inner=PedroStrokeCircular.path(inner,true);
+        var da=descriptors(outer),db=descriptors(inner),last="No matching uniform frame offsets.";
+        for(var shift=0;shift<inner.vertices.length;shift++) {
+            var candidate=shifted(inner,shift),dc=db.slice(shift).concat(db.slice(0,shift));
+            try{return match(outer,candidate,da,dc,orientation,"uniform closed frame / miter joins");}catch(e){last=e.toString();}
+        }
+        fail("No uniform frame centerline: "+last);
+    }
+    function openBand(input) {
+        var s=normalize(input),n=s.vertices.length;
+        for(var k=0;k<n;k++)if(!straight(s,k))fail("Angular connector recovery currently requires straight sides and butt ends.");
+        if(n<6 || n%2)fail("Angular connector needs matched side chains and two butt ends.");
+        simple(s.vertices,true);
+        function chain(start,count,reverse){var r={vertices:[],inTangents:[],outTangents:[],closed:false};for(var i=0;i<count;i++){r.vertices.push(s.vertices[(start+i)%n]);r.inTangents.push([0,0]);r.outTangents.push([0,0]);}return reverse ? PedroStrokeCircular.path(r,true) : r;}
+        var found=null;
+        for(var end=0;end<n/2;end++) {
+            var a=chain((end+1)%n,n/2,false),b=chain((end+1+n/2)%n,n/2,true);
+            try {
+                var da=descriptors(a),db=descriptors(b),orient=cross(da[0].axis,sub(b.vertices[0],a.vertices[0]))>0 ? 1 : -1;
+                var m=match(a,b,da,db,orient,"angular open connector / butt caps / miter joins");
+                for(var side=0;side<2;side++) {
+                    var index=side ? a.vertices.length-1 : 0,edge=side ? da.length-1 : 0,v=sub(b.vertices[index],a.vertices[index]);
+                    if(Math.abs(dot(v,da[edge].axis))>Math.max(0.005,m.width*0.0005) || Math.abs(length(v)-m.width)>Math.max(0.005,m.width*0.0005))fail("Connector ends must be perpendicular butt caps.");
+                }
+                if(found)fail("Ambiguous connector centerline.");found=m;
+            } catch(e) {if(e.toString().indexOf("Ambiguous connector")>=0)throw e;}
+        }
+        if(!found)fail("No uniform angular connector with perpendicular butt ends.");return found;
+    }
+    function compound(paths,rule) {
+        var normalized=[normalize(paths[0]),normalize(paths[1])];
+        try{return PedroStrokeCircular.ring(normalized,rule);}catch(e){return frame(normalized,rule);}
+    }
+    return {normalize:normalize,frame:frame,openBand:openBand,compound:compound,simpleShape:function(s){simple(samples(s),s.closed);}};
 }());
 
 // Pure ES3 geometry. No AE objects, mutations or external dependencies.
@@ -215,11 +419,16 @@ var PedroStrokeGeometry = (function () {
         return model(center,axis,span+width,width,2,"Bezier capsule (sampled fit)",error);
     }
     function recognize(s) {
-        s=normalize(s);
-        var rect=polygonRectangle(s);if(rect)return rect;
-        try {return capsule(s);} catch(error) {
-            // Keep established rejection diagnostics unless a circular arc is recognized.
-            try {return PedroStrokeCircular.arc(s);} catch(arcError) {throw error;}
+        s=PedroStrokeOutlines.normalize(s);
+        try {
+            var legacy=normalize(s),rect=polygonRectangle(legacy);if(rect)return rect;
+            return capsule(legacy);
+        } catch(error) {
+            try {return PedroStrokeCircular.arc(s);} catch(arcError) {
+                try {return PedroStrokeCircular.roundArc(s);}catch(roundError){
+                    try {return PedroStrokeOutlines.openBand(s);}catch(bandError){throw error;}
+                }
+            }
         }
     }
     // Synthetic fixtures: these are not evidence of Figma/Illustrator export compatibility.
@@ -266,7 +475,7 @@ var PedroStrokeHost = (function () {
             if(blend && blend.value!==1) fail("Non-normal group blend mode is not supported.");
             return leaf(group.property("ADBE Vectors Group"),chain.concat([group.propertyIndex]));
         }
-        if(groups.length || (paths.length!==1 && paths.length!==2) || fills.length!==1) fail("Select one supported outline, or two circular ring contours, with one solid fill inside a single group chain.");
+        if(groups.length || (paths.length!==1 && paths.length!==2) || fills.length!==1) fail("Select one supported outline, or two matching frame contours, with one solid fill inside a single group chain.");
         var fillBlend=fills[0].property("ADBE Vector Blend Mode");
         if(fillBlend && fillBlend.value!==1) fail("Non-normal fill blend mode is not supported.");
         return {chain:chain,path:paths[0],paths:paths,fill:fills[0]};
@@ -289,12 +498,12 @@ var PedroStrokeHost = (function () {
         if(found.paths.length===2) {
             var shapes=[];
             for(var pi=0;pi<2;pi++) {
-                if(found.paths[pi].matchName!=="ADBE Vector Shape - Group") fail("Ring contours must be Bezier paths.");
+                if(found.paths[pi].matchName!=="ADBE Vector Shape - Group") fail("Frame contours must be Bezier paths. Convert native shapes to Bezier first.");
                 shapes.push(found.paths[pi].property("ADBE Vector Shape").value);
             }
             var rule=found.fill.property("ADBE Vector Fill Rule");
             if(!rule) fail("Cannot determine the compound fill rule.");
-            geometry=PedroStrokeCircular.ring(shapes,rule.value);
+            geometry=PedroStrokeOutlines.compound(shapes,rule.value);
         } else if(source.matchName==="ADBE Vector Shape - Rect") geometry=PedroStrokeGeometry.rectangle(
             source.property("ADBE Vector Rect Size").value,source.property("ADBE Vector Rect Position").value,source.property("ADBE Vector Rect Roundness").value);
         else geometry=PedroStrokeGeometry.recognize(source.property("ADBE Vector Shape").value);
@@ -338,6 +547,10 @@ var PedroStrokeHost = (function () {
         stroke.property("ADBE Vector Stroke Color").setValue(plan.color);
         stroke.property("ADBE Vector Stroke Opacity").setValue(plan.opacity);
         stroke.property("ADBE Vector Stroke Line Cap").setValue(plan.geometry.cap);
+        if(plan.geometry.join) {
+            stroke.property("ADBE Vector Stroke Line Join").setValue(plan.geometry.join);
+            stroke.property("ADBE Vector Stroke Miter Limit").setValue(plan.geometry.miterLimit);
+        }
         var trim=contentsAt(copy,plan.chain).addProperty("ADBE Vector Filter - Trim");
         var end=trim.property("ADBE Vector Trim End");
         if(options.animate) {
@@ -349,6 +562,7 @@ var PedroStrokeHost = (function () {
         var check=c.property(1).property("ADBE Vector Shape").value;
         var actualWidth=c.property(2).property("ADBE Vector Stroke Width").value;
         if(check.closed!==data.closed || check.vertices.length!==data.vertices.length || c.numProperties!==3 || Math.abs(actualWidth-plan.geometry.width)>Math.max(0.0001,plan.geometry.width*0.00001)) fail("Generated geometry verification failed.");
+        if(plan.geometry.join && (c.property(2).property("ADBE Vector Stroke Line Join").value!==plan.geometry.join || c.property(2).property("ADBE Vector Stroke Miter Limit").value<plan.geometry.miterLimit-0.0001))fail("Generated corner join verification failed.");
         for(var f=0;f<3;f++) {
             var key=["vertices","inTangents","outTangents"][f];
             if(check[key].length!==data[key].length) fail("Generated path tangent count verification failed.");

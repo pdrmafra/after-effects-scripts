@@ -26,7 +26,7 @@ var PedroStrokeHost = (function () {
             if(blend && blend.value!==1) fail("Non-normal group blend mode is not supported.");
             return leaf(group.property("ADBE Vectors Group"),chain.concat([group.propertyIndex]));
         }
-        if(groups.length || (paths.length!==1 && paths.length!==2) || fills.length!==1) fail("Select one supported outline, or two circular ring contours, with one solid fill inside a single group chain.");
+        if(groups.length || (paths.length!==1 && paths.length!==2) || fills.length!==1) fail("Select one supported outline, or two matching frame contours, with one solid fill inside a single group chain.");
         var fillBlend=fills[0].property("ADBE Vector Blend Mode");
         if(fillBlend && fillBlend.value!==1) fail("Non-normal fill blend mode is not supported.");
         return {chain:chain,path:paths[0],paths:paths,fill:fills[0]};
@@ -49,12 +49,12 @@ var PedroStrokeHost = (function () {
         if(found.paths.length===2) {
             var shapes=[];
             for(var pi=0;pi<2;pi++) {
-                if(found.paths[pi].matchName!=="ADBE Vector Shape - Group") fail("Ring contours must be Bezier paths.");
+                if(found.paths[pi].matchName!=="ADBE Vector Shape - Group") fail("Frame contours must be Bezier paths. Convert native shapes to Bezier first.");
                 shapes.push(found.paths[pi].property("ADBE Vector Shape").value);
             }
             var rule=found.fill.property("ADBE Vector Fill Rule");
             if(!rule) fail("Cannot determine the compound fill rule.");
-            geometry=PedroStrokeCircular.ring(shapes,rule.value);
+            geometry=PedroStrokeOutlines.compound(shapes,rule.value);
         } else if(source.matchName==="ADBE Vector Shape - Rect") geometry=PedroStrokeGeometry.rectangle(
             source.property("ADBE Vector Rect Size").value,source.property("ADBE Vector Rect Position").value,source.property("ADBE Vector Rect Roundness").value);
         else geometry=PedroStrokeGeometry.recognize(source.property("ADBE Vector Shape").value);
@@ -98,6 +98,10 @@ var PedroStrokeHost = (function () {
         stroke.property("ADBE Vector Stroke Color").setValue(plan.color);
         stroke.property("ADBE Vector Stroke Opacity").setValue(plan.opacity);
         stroke.property("ADBE Vector Stroke Line Cap").setValue(plan.geometry.cap);
+        if(plan.geometry.join) {
+            stroke.property("ADBE Vector Stroke Line Join").setValue(plan.geometry.join);
+            stroke.property("ADBE Vector Stroke Miter Limit").setValue(plan.geometry.miterLimit);
+        }
         var trim=contentsAt(copy,plan.chain).addProperty("ADBE Vector Filter - Trim");
         var end=trim.property("ADBE Vector Trim End");
         if(options.animate) {
@@ -109,6 +113,7 @@ var PedroStrokeHost = (function () {
         var check=c.property(1).property("ADBE Vector Shape").value;
         var actualWidth=c.property(2).property("ADBE Vector Stroke Width").value;
         if(check.closed!==data.closed || check.vertices.length!==data.vertices.length || c.numProperties!==3 || Math.abs(actualWidth-plan.geometry.width)>Math.max(0.0001,plan.geometry.width*0.00001)) fail("Generated geometry verification failed.");
+        if(plan.geometry.join && (c.property(2).property("ADBE Vector Stroke Line Join").value!==plan.geometry.join || c.property(2).property("ADBE Vector Stroke Miter Limit").value<plan.geometry.miterLimit-0.0001))fail("Generated corner join verification failed.");
         for(var f=0;f<3;f++) {
             var key=["vertices","inTangents","outTangents"][f];
             if(check[key].length!==data[key].length) fail("Generated path tangent count verification failed.");

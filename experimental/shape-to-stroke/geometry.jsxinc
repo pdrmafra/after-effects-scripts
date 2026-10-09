@@ -109,11 +109,16 @@ var PedroStrokeGeometry = (function () {
         return model(center,axis,span+width,width,2,"Bezier capsule (sampled fit)",error);
     }
     function recognize(s) {
-        s=normalize(s);
-        var rect=polygonRectangle(s);if(rect)return rect;
-        try {return capsule(s);} catch(error) {
-            // Keep established rejection diagnostics unless a circular arc is recognized.
-            try {return PedroStrokeCircular.arc(s);} catch(arcError) {throw error;}
+        s=PedroStrokeOutlines.normalize(s);
+        try {
+            var legacy=normalize(s),rect=polygonRectangle(legacy);if(rect)return rect;
+            return capsule(legacy);
+        } catch(error) {
+            try {return PedroStrokeCircular.arc(s);} catch(arcError) {
+                try {return PedroStrokeCircular.roundArc(s);}catch(roundError){
+                    try {return PedroStrokeOutlines.openBand(s);}catch(bandError){throw error;}
+                }
+            }
         }
     }
     // Synthetic fixtures: these are not evidence of Figma/Illustrator export compatibility.

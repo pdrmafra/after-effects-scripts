@@ -58,6 +58,45 @@ var PedroStrokeFixtures = (function () {
         }
         boundary(ro,start,step);boundary(ri,start+sweep,-step);return data;
     }
+    // Independent synthetic offset construction, not the recognizer's midpoint solver.
+    function polygonOffset(points,distance,closed) {
+        var n=points.length,out=[];
+        function line(i) {var a=points[i],b=points[(i+1)%n],dx=b[0]-a[0],dy=b[1]-a[1],len=Math.sqrt(dx*dx+dy*dy);return {p:[a[0]-dy/len*distance,a[1]+dx/len*distance],d:[dx/len,dy/len]};}
+        for(var i=0;i<n;i++) {
+            var next=line(i===n-1 && !closed ? i-1 : i);
+            if(!closed && (i===0 || i===n-1)){out.push(i===0 ? next.p : [points[i][0]-next.d[1]*distance,points[i][1]+next.d[0]*distance]);continue;}
+            var previous=line((i+n-1)%n),den=previous.d[0]*next.d[1]-previous.d[1]*next.d[0];
+            var dx=next.p[0]-previous.p[0],dy=next.p[1]-previous.p[1],t=(dx*next.d[1]-dy*next.d[0])/den;
+            out.push([previous.p[0]+t*previous.d[0],previous.p[1]+t*previous.d[1]]);
+        }
+        return out;
+    }
+    function polygonFrame(points,width){return {data:straight(polygonOffset(points,-width/2,true)),extraPath:reverse(straight(polygonOffset(points,width/2,true)))};}
+    function connector(points,width){return straight(polygonOffset(points,-width/2,false).concat(polygonOffset(points,width/2,false).reverse()));}
+    function regular(count,radius){var pts=[];for(var i=0;i<count;i++){var a=-Math.PI/2+i*2*Math.PI/count;pts.push([radius*Math.cos(a),radius*Math.sin(a)]);}return pts;}
+    function roundedRect(w,h,r) {
+        var x=w/2,y=h/2,k=0.5522847498307936*r;
+        return {vertices:[[-x+r,-y],[x-r,-y],[x,-y+r],[x,y-r],[x-r,y],[-x+r,y],[-x,y-r],[-x,-y+r]],
+            inTangents:[[-k,0],[0,0],[0,-k],[0,0],[k,0],[0,0],[0,k],[0,0]],
+            outTangents:[[0,0],[k,0],[0,0],[0,k],[0,0],[-k,0],[0,0],[0,-k]],closed:true};
+    }
+    function roundedFrame(w,h,r,width){return {data:roundedRect(w+width,h+width,r+width/2),extraPath:reverse(roundedRect(w-width,h-width,r-width/2))};}
+    function roundBand(ro,ri,start,sweep) {
+        var result={vertices:[],inTangents:[],outTangents:[],closed:true},radius=(ro+ri)/2,cap=(ro-ri)/2,sign=sweep>0 ? 1 : -1;
+        function append(r,center,a,delta) {
+            var count=Math.ceil(Math.abs(delta)/(Math.PI/2)),step=delta/count,h=4/3*Math.tan(step/4);
+            for(var i=0;i<=count;i++) {
+                var angle=a+i*step,v=[center[0]+r*Math.cos(angle),center[1]+r*Math.sin(angle)],incoming=i ? [r*Math.sin(angle)*h,-r*Math.cos(angle)*h] : [0,0],outgoing=i<count ? [-r*Math.sin(angle)*h,r*Math.cos(angle)*h] : [0,0];
+                if(i===0 && result.vertices.length){result.outTangents[result.vertices.length-1]=outgoing;continue;}
+                result.vertices.push(v);result.inTangents.push(incoming);result.outTangents.push(outgoing);
+            }
+        }
+        append(ro,[0,0],start,sweep);
+        append(cap,[radius*Math.cos(start+sweep),radius*Math.sin(start+sweep)],start+sweep,sign*Math.PI);
+        append(ri,[0,0],start+sweep,-sweep);
+        append(cap,[radius*Math.cos(start),radius*Math.sin(start)],start+sign*Math.PI,sign*Math.PI);
+        result.inTangents[0]=result.inTangents.pop();result.vertices.pop();result.outTangents.pop();return result;
+    }
     function catalog() {
         var cases=[];
         function add(name,expected,parametric,rounded,angle,nested,options) {cases.push({name:name,expected:expected,parametric:parametric,rounded:rounded,angle:angle,nested:nested,options:options || {}});}
@@ -85,7 +124,7 @@ var PedroStrokeFixtures = (function () {
         var star=[];
         for(var i=0;i<10;i++){var a=-Math.PI/2+i*Math.PI/5,r=i%2 ? 35 : 80;star.push([Math.cos(a)*r,Math.sin(a)*r]);}
         add("Star",false,false,false,0,false,{data:straight(star)});
-        add("L-shaped outline",false,false,false,0,false,{data:straight([[-70,-70],[-40,-70],[-40,40],[70,40],[70,70],[-70,70]])});
+        add("L-shaped outline",true,false,false,0,false,{data:straight([[-70,-70],[-40,-70],[-40,40],[70,40],[70,70],[-70,70]])});
         add("Trapezoid",false,false,false,0,false,{data:straight([[-90,-25],[65,-25],[90,25],[-90,25]])});
         add("Intermediate corner radius",false,true,true,0,false,{roundness:5});
         add("Circle",false,false,false,0,false,{data:ellipse(140,140)});
@@ -113,6 +152,58 @@ var PedroStrokeFixtures = (function () {
         add("Nonradial arc end",false,false,false,0,false,{data:skewed});
         var uneven=band(85,55,0,Math.PI);uneven.vertices[4][1]+=9;
         add("Variable-width arc",false,false,false,0,false,{data:uneven});
+        var square=[[-70,-70],[70,-70],[70,70],[-70,70]],rectangle=[[-100,-50],[100,-50],[100,50],[-100,50]];
+        add("Square frame",true,false,false,0,false,polygonFrame(square,12));
+        add("Rectangle frame",true,false,false,0,false,polygonFrame(rectangle,14));
+        add("Triangle frame",true,false,false,0,false,polygonFrame(regular(3,85),10));
+        add("Diamond frame",true,false,false,0,false,polygonFrame([[0,-85],[90,0],[0,85],[-90,0]],10));
+        add("Pentagon frame",true,false,false,0,false,polygonFrame(regular(5,80),10));
+        add("Hexagon frame",true,false,false,0,false,polygonFrame(regular(6,80),10));
+        add("Octagon frame",true,false,false,0,false,polygonFrame(regular(8,80),10));
+        add("Irregular convex frame",true,false,false,0,false,polygonFrame([[-90,-40],[-10,-85],[90,-30],[65,65],[-60,70]],10));
+        add("Concave L frame",true,false,false,0,false,polygonFrame([[-80,-80],[-20,-80],[-20,20],[80,20],[80,80],[-80,80]],8));
+        add("Star frame",true,false,false,0,false,polygonFrame(star,6));
+        add("Rounded rectangle frame",true,false,false,0,false,roundedFrame(200,120,30,12));
+        add("Capsule frame",true,false,false,0,false,roundedFrame(200,80,40,12));
+        var swapped=polygonFrame(regular(3,85),10),temp=swapped.data;swapped.data=reverse(swapped.extraPath);swapped.extraPath=reverse(temp);
+        add("Swapped reversed triangle frame",true,false,false,0,false,swapped);
+        var eo=polygonFrame(square,12);eo.extraPath=reverse(eo.extraPath);eo.fillRule=2;
+        add("Even-odd square frame",true,false,false,0,false,eo);
+        var collinear=polygonFrame(rectangle,14);collinear.data.vertices.splice(1,0,[0,-57]);collinear.data.inTangents.splice(1,0,[0,0]);collinear.data.outTangents.splice(1,0,[0,0]);
+        add("Redundant collinear frame vertex",true,false,false,0,false,collinear);
+        var handles=polygonFrame(rectangle,14);
+        for(var hi=0;hi<4;hi++) {var hj=(hi+1)%4,p=handles.data.vertices[hi],q=handles.data.vertices[hj];handles.data.outTangents[hi]=[(q[0]-p[0])/3,(q[1]-p[1])/3];handles.data.inTangents[hj]=[(p[0]-q[0])/3,(p[1]-q[1])/3];}
+        add("Collinear cubic handles frame",true,false,false,0,false,handles);
+        var nested=polygonFrame(square,12);nested.mirror=true;
+        add("Nested mirrored square frame",true,false,false,0,true,nested);
+        add("V connector",true,false,false,0,false,{data:connector([[-80,-60],[0,60],[80,-60]],12)});
+        add("Z connector",true,false,false,0,false,{data:connector([[-85,-60],[85,-60],[-85,60],[85,60]],12)});
+        add("U connector",true,false,false,0,false,{data:connector([[-75,-65],[-75,65],[75,65],[75,-65]],12)});
+        var zig=connector([[-90,-60],[-30,-60],[-30,0],[30,0],[30,60],[90,60]],12);
+        add("Reversed zigzag connector",true,false,false,0,false,{data:reverse(zig)});
+        var variableFrame=polygonFrame(rectangle,14);variableFrame.extraPath.vertices[1][0]+=5;
+        add("Variable-width frame",false,false,false,0,false,variableFrame);
+        var same=polygonFrame(square,12);same.extraPath=reverse(same.extraPath);
+        add("Same-winding solid square",false,false,false,0,false,same);
+        var outside=polygonFrame(square,12);translate(outside.extraPath,[30,0]);
+        add("Outside frame hole",false,false,false,0,false,outside);
+        var crossing=polygonFrame(square,12),tmp=crossing.data.vertices[1];crossing.data.vertices[1]=crossing.data.vertices[2];crossing.data.vertices[2]=tmp;
+        add("Crossed frame contour",false,false,false,0,false,crossing);
+        var touching=polygonFrame(square,12);touching.extraPath.vertices[0]=touching.data.vertices[0];
+        add("Touching frame contours",false,false,false,0,false,touching);
+        var badRound=roundedFrame(200,120,30,12);badRound.data.outTangents[1][0]*=1.05;
+        add("Distorted rounded frame",false,false,false,0,false,badRound);
+        add("Solid square",false,false,false,0,false,{data:straight(square)});
+        add("T junction",false,false,false,0,false,{data:straight([[-80,-70],[80,-70],[80,-50],[10,-50],[10,70],[-10,70],[-10,-50],[-80,-50]])});
+        add("Arrow with wide head",false,false,false,0,false,{data:straight([[-90,-10],[40,-10],[40,-35],[90,0],[40,35],[40,10],[-90,10]])});
+        var skewConnector=connector([[-75,-70],[-75,60],[75,60]],20);skewConnector.vertices[0][1]+=5;
+        add("Skewed connector cap",false,false,false,0,false,{data:skewConnector});
+        add("Round-ended quarter arc",true,false,false,0,false,{data:roundBand(85,55,0,Math.PI/2)});
+        add("Round-ended three-quarter arc",true,false,false,0,false,{data:roundBand(85,55,Math.PI/7,3*Math.PI/2)});
+        add("Reversed round-ended arc",true,false,false,0,false,{data:reverse(roundBand(85,55,Math.PI/7,-Math.PI))});
+        add("Overlapping round arc caps",false,false,false,0,false,{data:roundBand(85,55,0,350*Math.PI/180)});
+        add("Acute triangle frame",true,false,false,0,false,polygonFrame([[0,-80],[20,80],[-20,80]],10));
+        add("Thin 2-unit square frame",true,false,false,0,false,polygonFrame(square,2));
         return cases;
     }
     function fromCase(comp,entry,name) {return source(comp,name || entry.name,entry.parametric,entry.rounded,entry.angle,entry.nested,entry.options);}
@@ -122,7 +213,7 @@ var PedroStrokeFixtures = (function () {
             for(var section=0;section<2;section++) {
                 var expected=section===0,total=0;
                 for(var ei=0;ei<entries.length;ei++)if(entries[ei].expected===expected)total++;
-                var c=app.project.items.addComp("Shape to Stroke v0.0.4 "+(expected ? "READY" : "SKIP")+" "+new Date().getTime(),1200,Math.ceil(total/3)*240+80,1,4,24);
+                var c=app.project.items.addComp("Shape to Stroke v0.0.5 "+(expected ? "READY" : "SKIP")+" "+new Date().getTime(),1200,Math.ceil(total/3)*240+80,1,4,24);
                 created.push(c);if(expected)ready=c;var count=0;
                 for(var i=0;i<entries.length;i++) if(entries[i].expected===expected) {
                     var name=(count+1<10 ? "0" : "")+(count+1)+" "+(expected ? "READY" : "SKIP")+" - "+entries[i].name;
@@ -139,5 +230,6 @@ var PedroStrokeFixtures = (function () {
             throw error;
         }
     }
-    return {source:source,toShape:toShape,catalog:catalog,fromCase:fromCase,demo:demo,ellipse:ellipse,band:band,reverse:reverse,translate:translate};
+    return {source:source,toShape:toShape,catalog:catalog,fromCase:fromCase,demo:demo,ellipse:ellipse,band:band,reverse:reverse,translate:translate,
+        polygonFrame:polygonFrame,connector:connector,regular:regular,roundedFrame:roundedFrame,straight:straight,roundBand:roundBand};
 }());

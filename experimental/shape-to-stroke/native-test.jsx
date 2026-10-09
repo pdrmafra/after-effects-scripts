@@ -1,6 +1,7 @@
 // Creates and removes only its own synthetic comps. Run only with tool approval.
 (function () {
     #include "circular.jsxinc"
+    #include "outlines.jsxinc"
     #include "geometry.jsxinc"
     #include "host.jsxinc"
     #include "settings.jsxinc"
@@ -38,6 +39,15 @@
         var curveRows=[["circular-ring","Ring compound path"],["even-odd-ring","Even-odd same-winding ring"],
             ["thin-ring","Thin 2-unit ring"],["quarter-arc","Quarter arc band"],["three-quarter-arc","Three-quarter arc"],
             ["oblique-arc","Reversed oblique arc"],["nested-mirrored-arc","Nested mirrored half arc"]];
+        curveRows=curveRows.concat([["square-frame","Square frame"],["rectangle-frame","Rectangle frame"],["triangle-frame","Triangle frame"],
+            ["diamond-frame","Diamond frame"],["pentagon-frame","Pentagon frame"],["hexagon-frame","Hexagon frame"],["octagon-frame","Octagon frame"],
+            ["irregular-frame","Irregular convex frame"],["concave-frame","Concave L frame"],["star-frame","Star frame"],
+            ["rounded-frame","Rounded rectangle frame"],["capsule-frame","Capsule frame"],["swapped-triangle-frame","Swapped reversed triangle frame"],
+            ["even-odd-square-frame","Even-odd square frame"],["redundant-frame","Redundant collinear frame vertex"],["handles-frame","Collinear cubic handles frame"],
+            ["nested-square-frame","Nested mirrored square frame"],["v-connector","V connector"],["z-connector","Z connector"],["u-connector","U connector"],
+            ["zigzag-connector","Reversed zigzag connector"],["l-connector","L-shaped outline"],["round-quarter-arc","Round-ended quarter arc"],
+            ["round-three-quarter-arc","Round-ended three-quarter arc"],["reverse-round-arc","Reversed round-ended arc"],
+            ["acute-triangle-frame","Acute triangle frame"],["thin-square-frame","Thin 2-unit square frame"]]);
         function entryNamed(name) {var entries=PedroStrokeFixtures.catalog();for(var i=0;i<entries.length;i++)if(entries[i].name===name)return entries[i];throw new Error("Missing fixture: "+name);}
         for(ci=0;ci<curveRows.length;ci++)(function(row){test(row[0]+" curved geometry / style / render pair",function(){
             var c=fresh(),f=PedroStrokeFixtures.fromCase(c,entryNamed(row[1])),g=PedroStrokeHost.snapshot(f.layer).geometry;
@@ -47,6 +57,8 @@
             assert(s.closed===!!g.closed && s.vertices.length===g.vertices.length,"Wrong curved topology");
             assert(near(out.property(2).property("ADBE Vector Stroke Width").value,g.width),"Wrong circular thickness");
             assert(near(out.property(2).property("ADBE Vector Stroke Opacity").value,73),"Curved opacity lost");
+            assert(out.property(2).property("ADBE Vector Stroke Line Cap").value===g.cap,"Wrong cap");
+            if(g.join)assert(out.property(2).property("ADBE Vector Stroke Line Join").value===g.join && out.property(2).property("ADBE Vector Stroke Miter Limit").value>=g.miterLimit-0.0001,"Wrong polygon corner style");
             assert(!f.layer.enabled && copy.selected,"Wrong conversion state");
             c.saveFrameToPng(0,new File(outputDir.fsName+"/"+row[0]+"-after.png"));
         });})(curveRows[ci]);
@@ -61,6 +73,16 @@
             var end=out.property(3).property("ADBE Vector Trim End");assert(end.numKeys===2 && near(end.valueAtTime(0.75,false),50),"Curved trim motion mismatch");
             for(var fi=0;fi<5;fi++)c.saveFrameToPng(0.5+fi*0.125,new File(outputDir.fsName+"/motion-"+(isRing ? "ring" : "arc")+"-"+fi+".png"));
         });})(curvedType===0);
+        var motionRows=[["frame","Star frame"],["rounded-frame","Rounded rectangle frame"],["connector","Z connector"],["round-arc","Round-ended three-quarter arc"]];
+        for(var mi=0;mi<motionRows.length;mi++)(function(row){test(row[0]+" reverse / draw-on / seam / metadata",function(){
+            var c=fresh(),f=PedroStrokeFixtures.fromCase(c,entryNamed(row[1]));f.layer.property("ADBE Transform Group").property("ADBE Position").setValue([240,180]);c.time=0.5;
+            var before=PedroStrokeHost.snapshot(f.layer).geometry,expected=PedroStrokeCircular.path(before,true),copy=PedroStrokeHost.create(c,[f.layer],{reverse:true,animate:true,frames:12})[0];
+            var out=PedroStrokeHost.contentsAt(copy,f.chain),s=out.property(1).property("ADBE Vector Shape").value;
+            assert(s.closed===!!before.closed && s.vertices.length===expected.vertices.length,"Wrong topology");
+            for(var vi=0;vi<s.vertices.length;vi++)for(var d=0;d<2;d++)assert(near(s.vertices[vi][d],expected.vertices[vi][d]) && near(s.inTangents[vi][d],expected.inTangents[vi][d]) && near(s.outTangents[vi][d],expected.outTangents[vi][d]),"Reverse verification failed");
+            var end=out.property(3).property("ADBE Vector Trim End");assert(end.numKeys===2 && near(end.keyTime(1),0.5) && near(end.keyTime(2),1) && near(end.valueAtTime(0.75,false),50),"Wrong linear draw-on");
+            for(var fi=0;fi<5;fi++)c.saveFrameToPng(0.5+fi*0.125,new File(outputDir.fsName+"/motion-"+row[0]+"-"+fi+".png"));
+        });})(motionRows[mi]);
         test("reverse / draw-on / keep disabled",function(){
             var c=fresh(),f=PedroStrokeFixtures.source(c,"Source",false,true,0,false);c.time=0.5;
             var model=PedroStrokeHost.snapshot(f.layer).geometry;
@@ -117,6 +139,17 @@
                 assert(s.closed===(i===0) && s.vertices.length===4,"Wrong curved Delete geometry");
             }
         });
+        test("frame / connector / round arc batch Delete preserves joins, caps and selection",function(){
+            var c=fresh(),names=["Triangle frame","Z connector","Round-ended quarter arc"],sources=[],ids=[],chains=[],models=[];
+            for(var i=0;i<names.length;i++){var f=PedroStrokeFixtures.fromCase(c,entryNamed(names[i]));sources.push(f.layer);ids.push(f.layer.id);chains.push(f.chain);models.push(PedroStrokeHost.snapshot(f.layer).geometry);}
+            var copies=PedroStrokeHost.create(c,sources,{originalAction:"delete",reverse:true});assert(c.numLayers===3 && copies.length===3,"Wrong Delete batch size");
+            for(i=0;i<copies.length;i++) {
+                for(var j=0;j<ids.length;j++)assert(copies[i].id!==ids[j],"Original retained");
+                var out=PedroStrokeHost.contentsAt(copies[i],chains[i]);assert(copies[i].selected && out.property(1).property("ADBE Vector Shape").value.closed===!!models[i].closed,"Topology / selection changed");
+                assert(out.property(2).property("ADBE Vector Stroke Line Cap").value===models[i].cap,"Cap lost on Delete");
+                if(models[i].join)assert(out.property(2).property("ADBE Vector Stroke Miter Limit").value>=models[i].miterLimit-0.0001,"Miter lost on Delete");
+            }
+        });
         var entries=PedroStrokeFixtures.catalog();
         for(var ei=0;ei<entries.length;ei++) (function(entry){test("catalog "+(entry.expected ? "READY " : "SKIP ")+entry.name,function(){
             var c=fresh(),f=PedroStrokeFixtures.fromCase(c,entry),before=c.numLayers;
@@ -130,10 +163,10 @@
                 assert(c.numLayers===before && f.layer.enabled,"Rejected case mutated");
             }
         });})(entries[ei]);
-        test("expanded demo: 21 READY / 15 SKIP layers",function(){
+        test("expanded demo: 48 READY / 25 SKIP layers",function(){
             var demo=PedroStrokeFixtures.demo();
             for(var di=0;di<demo.comps.length;di++)owned.push(demo.comps[di]);
-            assert(demo.comps[0].numLayers===21 && demo.comps[1].numLayers===15,"Wrong demo counts");
+            assert(demo.comps[0].numLayers===48 && demo.comps[1].numLayers===25,"Wrong demo counts");
             demo.comps[0].saveFrameToPng(0,new File(outputDir.fsName+"/fixtures-ready.png"));
             demo.comps[1].saveFrameToPng(0,new File(outputDir.fsName+"/fixtures-skip.png"));
         });

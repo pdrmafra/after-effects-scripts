@@ -16,7 +16,7 @@ G.prototype.property=function(n){return typeof n==="number" ? this.items[n-1] : 
 G.prototype.push=function(p){p.propertyIndex=this.items.length+1;this.items.push(p);var self=this;p.remove=function(){self.items.splice(self.items.indexOf(p),1);};return p;};
 G.prototype.addProperty=function(n){var g=this.push(new G(n,this.owner)),fields;
 if(n==="ADBE Vector Shape - Group")fields={"ADBE Vector Shape":null};
-else if(n==="ADBE Vector Graphic - Stroke")fields={"ADBE Vector Stroke Width":1,"ADBE Vector Stroke Color":[1,1,1,1],"ADBE Vector Stroke Opacity":100,"ADBE Vector Stroke Line Cap":1};
+else if(n==="ADBE Vector Graphic - Stroke")fields={"ADBE Vector Stroke Width":1,"ADBE Vector Stroke Color":[1,1,1,1],"ADBE Vector Stroke Opacity":100,"ADBE Vector Stroke Line Cap":1,"ADBE Vector Stroke Line Join":1,"ADBE Vector Stroke Miter Limit":4};
 else if(n==="ADBE Vector Filter - Trim")fields={"ADBE Vector Trim End":100};
 else if(n==="ADBE Vector Shape - Rect")fields={"ADBE Vector Rect Size":[200,20],"ADBE Vector Rect Position":[0,0],"ADBE Vector Rect Roundness":0};
 else if(n==="ADBE Vector Graphic - Fill")fields={"ADBE Vector Fill Color":[0.2,0.5,0.9,1],"ADBE Vector Fill Opacity":73,"ADBE Vector Fill Rule":1};
@@ -33,8 +33,9 @@ Layer.prototype.duplicate=function(){var copy=new Layer(this.comp,this.name+" co
 Layer.prototype.remove=function(){if(this.comp.failRemove===this.name)throw new Error("injected removal failure");this.comp.layers.splice(this.comp.layers.indexOf(this),1);};
 function source(c,name){var l=new Layer(c,name);var root=l.property("ADBE Root Vectors Group");root.addProperty("ADBE Vector Shape - Rect");root.addProperty("ADBE Vector Graphic - Fill");return l;}
 function curvedSource(c,name,ring,rule){var l=new Layer(c,name),root=l.property("ADBE Root Vectors Group");var a=root.addProperty("ADBE Vector Shape - Group");a.property("ADBE Vector Shape").setValue(ring ? PedroStrokeFixtures.ellipse(160,160) : PedroStrokeFixtures.band(85,55,0,Math.PI));if(ring){var b=root.addProperty("ADBE Vector Shape - Group");b.property("ADBE Vector Shape").setValue(rule===2 ? PedroStrokeFixtures.ellipse(110,110) : PedroStrokeFixtures.reverse(PedroStrokeFixtures.ellipse(110,110)));}root.addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Rule").setValue(rule || 1);return l;}
+function outlineSource(c,name,kind){var l=new Layer(c,name),root=l.property("ADBE Root Vectors Group"),data=kind==="frame" ? PedroStrokeFixtures.polygonFrame(PedroStrokeFixtures.regular(3,85),10) : {data:kind==="connector" ? PedroStrokeFixtures.connector([[-75,-70],[-75,60],[75,60]],20) : PedroStrokeFixtures.roundBand(85,55,0,Math.PI/2)};root.addProperty("ADBE Vector Shape - Group").property("ADBE Vector Shape").setValue(data.data);if(data.extraPath)root.addProperty("ADBE Vector Shape - Group").property("ADBE Vector Shape").setValue(data.extraPath);root.addProperty("ADBE Vector Graphic - Fill");return l;}
 `,c);
-  for(const f of ["circular.jsxinc","geometry.jsxinc","host.jsxinc","fixtures.jsxinc"])vm.runInContext(fs.readFileSync(__dirname+"/"+f,"utf8"),c);
+  for(const f of ["circular.jsxinc","outlines.jsxinc","geometry.jsxinc","host.jsxinc","fixtures.jsxinc"])vm.runInContext(fs.readFileSync(__dirname+"/"+f,"utf8"),c);
   return source=>JSON.parse(JSON.stringify(vm.runInContext(source,c)));
 }
 test("analysis leaves all source state untouched",()=>{
@@ -80,4 +81,13 @@ test("same-winding non-zero disk blocks a mixed batch; even-odd ring is supporte
 });
 test("missing compound fill rule refuses conversion without mutation",()=>{
   const run=setup();assert.deepEqual(run(`var c=new Comp(),a=curvedSource(c,"Ring",true,1);a.property("ADBE Root Vectors Group").property(3).property("ADBE Vector Fill Rule").remove();var error=false;try{PedroStrokeHost.create(c,[a],{});}catch(e){error=true;}[error,c.numLayers,a.enabled,app.groups]`),[true,1,true,0]);
+});
+for(const kind of ["frame","connector","round-arc"])for(const action of ["disable","delete"])test(`new outline host / reverse / ${kind} / ${action}`,()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=outlineSource(c,"Source","${kind}"),copy=PedroStrokeHost.create(c,[a],{reverse:true,animate:true,frames:12,originalAction:"${action}"})[0],out=copy.property("ADBE Root Vectors Group"),s=out.property(1).property("ADBE Vector Shape").value;[c.numLayers,s.closed,s.vertices.length,out.property(2).property("ADBE Vector Stroke Line Cap").value,out.property(3).property("ADBE Vector Trim End").numKeys,app.groups]`),[action==="delete" ? 1 : 2,kind==="frame",kind==="round-arc" ? 2 : 3,kind==="round-arc" ? 2 : 1,2,0]);
+});
+test("miter write failure restores both sources and never deletes originals",()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=source(c,"A"),b=outlineSource(c,"B","frame"),setter=P.prototype.setValue;P.prototype.setValue=function(v){if(this.matchName==="ADBE Vector Stroke Miter Limit")throw new Error("miter write failure");setter.call(this,v);};var error="";try{PedroStrokeHost.create(c,[a,b],{originalAction:"delete"});}catch(e){error=e.toString();}[error.indexOf("miter write failure")>=0,c.numLayers,c.layers.indexOf(a)>=0,c.layers.indexOf(b)>=0,a.enabled,b.enabled,a.selected,b.selected,app.groups]`),[true,2,true,true,true,true,true,true,0]);
+});
+test("clamped corner settings trigger verification rollback before original deletion",()=>{
+  const run=setup();assert.deepEqual(run(`var c=new Comp(),a=outlineSource(c,"A","frame"),setter=P.prototype.setValue;P.prototype.setValue=function(v){setter.call(this,this.matchName==="ADBE Vector Stroke Miter Limit" ? 1 : v);};var error="";try{PedroStrokeHost.create(c,[a],{originalAction:"delete"});}catch(e){error=e.toString();}[error.indexOf("corner join verification")>=0,c.numLayers,a.enabled,a.selected,app.groups]`),[true,1,true,true,0]);
 });

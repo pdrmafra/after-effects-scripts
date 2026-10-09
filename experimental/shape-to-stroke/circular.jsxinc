@@ -87,6 +87,37 @@ var PedroStrokeCircular = (function () {
         }
         return centerline(outer,(outer.radius+inner.radius)/2,width,false,"circular arc / butt caps (sampled fit)",Math.max(a.error,b.error));
     }
+    function roundArc(input) {
+        var s=normalize(input),groups=[],n=s.vertices.length;
+        function same(a,b){return length(sub(a.center,b.center))<Math.max(0.002,a.radius*0.00001) && Math.abs(a.radius-b.radius)<Math.max(0.002,a.radius*0.00001);}
+        for(var i=0;i<n;i++) {
+            if(straight(s,i))fail("Round-ended arc must contain only circular cubic segments.");
+            var part=fit(s,[i],false),last=groups.length ? groups[groups.length-1] : null;
+            if(last && same(last.circle,part))last.edges.push(i);else groups.push({circle:part,edges:[i]});
+        }
+        if(groups.length>1 && same(groups[0].circle,groups[groups.length-1].circle)) {
+            groups[0].edges=groups[groups.length-1].edges.concat(groups[0].edges);groups.pop();
+        }
+        if(groups.length!==4)fail("Round-ended arc needs two arc boundaries and two semicircular caps.");
+        for(i=0;i<4;i++)groups[i].circle=fit(s,groups[i].edges,false);
+        for(i=0;i<2;i++) {
+            var a=groups[i].circle,b=groups[i+2].circle,outer=a.radius>b.radius ? a : b,inner=outer===a ? b : a,width=outer.radius-inner.radius;
+            var caps=[groups[(i+1)%4].circle,groups[(i+3)%4].circle],tol=Math.max(0.003,width*0.0001);
+            if(width<EPS || length(sub(a.center,b.center))>tol || Math.abs(a.sweep+b.sweep)>0.00001)continue;
+            var model=centerline(outer,(outer.radius+inner.radius)/2,width,false,"circular arc / round caps (sampled fit)",Math.max(a.error,b.error));
+            var start=model.vertices[0],end=model.vertices[model.vertices.length-1];
+            if(length(sub(start,end))<=width+tol)continue;
+            var good=true;
+            for(var c=0;c<2;c++) {
+                if(Math.abs(caps[c].radius-width/2)>tol || Math.abs(Math.abs(caps[c].sweep)-Math.PI)>0.00001 || caps[c].sweep*outer.sweep<=0)good=false;
+                model.fitError=Math.max(model.fitError,caps[c].error);
+            }
+            var direct=length(sub(caps[0].center,start))<=tol && length(sub(caps[1].center,end))<=tol;
+            var swapped=length(sub(caps[1].center,start))<=tol && length(sub(caps[0].center,end))<=tol;
+            if(good && (direct || swapped)) {PedroStrokeOutlines.simpleShape(s);model.cap=2;return model;}
+        }
+        fail("Round arc boundaries/caps are not a single constant-width stroke.");
+    }
     function path(model,reverse) {
         var result={vertices:[],inTangents:[],outTangents:[],closed:!!model.closed},n=model.vertices.length;
         for(var i=0;i<n;i++) {
@@ -98,5 +129,5 @@ var PedroStrokeCircular = (function () {
         }
         return result;
     }
-    return {ring:ring,arc:arc,path:path};
+    return {ring:ring,arc:arc,roundArc:roundArc,path:path,segment:function(s,i){return fit(s,[i],false);}};
 }());

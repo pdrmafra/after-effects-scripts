@@ -6,6 +6,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent
 NAMES = ["native-rectangle", "native-capsule", "bezier-rectangle", "bezier-capsule", "nested-scaled-capsule"]
 NAMES += ["circular-ring", "even-odd-ring", "thin-ring", "quarter-arc", "three-quarter-arc", "oblique-arc", "nested-mirrored-arc"]
+NAMES += ["square-frame", "rectangle-frame", "triangle-frame", "diamond-frame", "pentagon-frame", "hexagon-frame", "octagon-frame",
+          "irregular-frame", "concave-frame", "star-frame", "rounded-frame", "capsule-frame", "swapped-triangle-frame", "even-odd-square-frame",
+          "redundant-frame", "handles-frame", "nested-square-frame", "v-connector", "z-connector", "u-connector", "zigzag-connector", "l-connector",
+          "round-quarter-arc", "round-three-quarter-arc", "reverse-round-arc"]
+NAMES += ["acute-triangle-frame", "thin-square-frame"]
 
 
 def read(name):
@@ -45,7 +50,7 @@ for name in NAMES:
     diff[:, :, 3] = 1
     rows.append(np.concatenate([tile(before, name + " / fill"), tile(after, "recovered stroke"), tile(diff, "alpha diff x20")], axis=1))
 
-for prefix in ["motion-", "motion-ring-", "motion-arc-"]:
+for prefix in ["motion-", "motion-ring-", "motion-arc-", "motion-frame-", "motion-rounded-frame-", "motion-connector-", "motion-round-arc-"]:
     motion = [read(f"{prefix}{i}.png") for i in range(5)]
     coverage = [float(frame[:, :, 3].sum()) for frame in motion]
     print(prefix + " alpha coverage:", coverage)
@@ -59,4 +64,4 @@ for prefix in ["motion-", "motion-ring-", "motion-arc-"]:
     rows.append(strip)
 if not cv2.imwrite(str(ROOT / "comparison-sheet.png"), np.concatenate(rows, axis=0)):
     raise IOError("Cannot write QA sheet")
-print("PASS: twelve rendered pairs and fifteen draw-on samples. Antialiasing is not pixel-identical.")
+print("PASS: 39 rendered pairs and 35 draw-on samples. Antialiasing is not pixel-identical.")
