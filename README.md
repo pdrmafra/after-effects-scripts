@@ -23,7 +23,7 @@ Free tools from my motion-design workflow. By [Pedro Mafra](https://pedromafra.c
 
 ## Install
 
-1. Download the ZIP from the **[latest release](https://github.com/pdrmafra/after-effects-scripts/releases/latest)** and unzip it.
+1. Open **[Releases](https://github.com/pdrmafra/after-effects-scripts/releases)**, download the ZIP from the newest release at the top and unzip it.
 2. In After Effects choose **File → Scripts → Run Script File…** and pick a script from the `Scripts` folder.
 
 Each file in `Scripts` works on its own; there is nothing else to install. To keep them in the **File → Scripts** menu, copy them into After Effects' Scripts folder and restart AE:
