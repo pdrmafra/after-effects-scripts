@@ -135,7 +135,7 @@ var PedroStrokeCircular = (function () {
     return {ring:ring,arc:arc,roundArc:roundArc,path:path,segment:function(s,i){return fit(s,[i],false);}};
 }());
 
-// Pure ES3: matched near-uniform offsets. Allow 5% thickness residuals, not invalid topology.
+// Pure ES3: matched near-uniform offsets. Bound the visible edge shift, not invalid topology.
 var PedroStrokeOutlines = (function () {
     var EPS=0.000001;
     function fail(m){throw new Error(m);}
@@ -222,27 +222,39 @@ var PedroStrokeOutlines = (function () {
         for(var i=0;i<limit;i++)out.push(straight(s,i) ? {line:true,axis:unit(sub(s.vertices[(i+1)%n],s.vertices[i]))} : {line:false,circle:PedroStrokeCircular.segment(s,i),axis:unit(s.outTangents[i])});
         return out;
     }
+    // One constant stroke centred between the boundaries shifts each edge by half the gap
+    // between the thinnest and thickest measurement. Use the middle width and allow at most
+    // 0.5 local units of edge shift, or 2.5% of the width on thin artwork.
+    function uniform(thickness) {
+        var low=Infinity,high=-Infinity;
+        for(var i=0;i<thickness.length;i++) {
+            if(!isFinite(thickness[i]) || thickness[i]<=EPS)fail("Invalid uniform offset width.");
+            low=Math.min(low,thickness[i]);high=Math.max(high,thickness[i]);
+        }
+        var width=(low+high)/2;
+        if(high-low>Math.max(0.005,Math.min(2,width*0.1))+EPS)fail("Outline thickness changes by more than half a unit at an edge (or 2.5% of a thin outline).");
+        return {width:width,error:(high-low)/2};
+    }
     function match(a,b,da,db,orientation,kind) {
-        var n=a.vertices.length,limit=a.closed ? n : n-1,width=0,error=0,total=0,ratio=1;
+        var n=a.vertices.length,limit=a.closed ? n : n-1,scale=0,error=0,total=0,ratio=1,thickness=[];
         for(var i=0;i<limit;i++) {
             var j=(i+1)%n,x=da[i],y=db[i];
             if(x.line!==y.line || dot(x.axis,y.axis)<0.999999)fail("Boundary segments do not correspond.");
             var signed=cross(x.axis,sub(b.vertices[i],a.vertices[i]))*orientation;
-            if(!i){width=signed;if(width<=EPS || !isFinite(width))fail("Invalid uniform offset width.");}
-            var tol=Math.max(0.005,width*0.05),centerTol=Math.max(0.005,width*0.0005);
-            error=Math.max(error,Math.abs(signed-width));if(Math.abs(signed-width)>tol)fail("Outline thickness changes.");
+            if(!i){scale=signed;if(scale<=EPS || !isFinite(scale))fail("Invalid uniform offset width.");}
+            thickness.push(signed);
             if(x.line) {
-                var end=cross(x.axis,sub(b.vertices[j],a.vertices[j]))*orientation;
-                error=Math.max(error,Math.abs(end-width));
-                if(Math.abs(end-width)>tol)fail("Outline sides are not parallel uniform offsets.");
+                thickness.push(cross(x.axis,sub(b.vertices[j],a.vertices[j]))*orientation);
                 total+=length(sub(mul(add(a.vertices[j],b.vertices[j]),0.5),mul(add(a.vertices[i],b.vertices[i]),0.5)));
             } else {
                 var ca=x.circle,cb=y.circle;
-                if(length(sub(ca.center,cb.center))>centerTol || Math.abs(ca.sweep-cb.sweep)>0.00001 || Math.abs(Math.abs(ca.radius-cb.radius)-width)>tol || dot(unit(sub(a.vertices[i],ca.center)),unit(sub(b.vertices[i],cb.center)))<0.999999)fail("Curved boundaries are not concentric uniform offsets.");
+                if(length(sub(ca.center,cb.center))>Math.max(0.005,scale*0.0005) || Math.abs(ca.sweep-cb.sweep)>0.00001 || dot(unit(sub(a.vertices[i],ca.center)),unit(sub(b.vertices[i],cb.center)))<0.999999)fail("Curved boundaries are not concentric uniform offsets.");
+                thickness.push(Math.abs(ca.radius-cb.radius));
                 total+=Math.abs(ca.sweep)*(ca.radius+cb.radius)/2;error=Math.max(error,ca.error,cb.error);
             }
         }
-        var model={vertices:[],inTangents:[],outTangents:[],closed:a.closed,width:width,cap:1,join:1,pathLength:total,totalLength:total,fitError:error,kind:kind};
+        var measured=uniform(thickness),width=measured.width;error=Math.max(error,measured.error);
+        var model={vertices:[],inTangents:[],outTangents:[],closed:a.closed,width:width,cap:1,join:1,pathLength:total,totalLength:total,fitError:error,kind:kind,thickness:thickness};
         for(i=0;i<n;i++) {
             model.vertices.push(mul(add(a.vertices[i],b.vertices[i]),0.5));model.inTangents.push(mul(add(a.inTangents[i],b.inTangents[i]),0.5));model.outTangents.push(mul(add(a.outTangents[i],b.outTangents[i]),0.5));
             ratio=Math.max(ratio,length(sub(a.vertices[i],b.vertices[i]))/width);
@@ -277,7 +289,8 @@ var PedroStrokeOutlines = (function () {
         var da=descriptors(outer),db=descriptors(inner),last="No matching uniform frame offsets.";
         for(var shift=0;shift<inner.vertices.length;shift++) {
             var candidate=shifted(inner,shift),dc=db.slice(shift).concat(db.slice(0,shift));
-            try{return match(outer,candidate,da,dc,orientation,"uniform closed frame / miter joins");}catch(e){last=e.toString();}
+            // Report the most specific failure, not just the last rotation tried.
+            try{return match(outer,candidate,da,dc,orientation,"uniform closed frame / miter joins");}catch(e){if(e.toString().indexOf("do not correspond")<0 || last.indexOf("No matching")===0)last=e.toString();}
         }
         fail("No uniform frame centerline: "+last);
     }
@@ -292,11 +305,14 @@ var PedroStrokeOutlines = (function () {
             var a=chain((end+1)%n,n/2,false),b=chain((end+1+n/2)%n,n/2,true);
             try {
                 var da=descriptors(a),db=descriptors(b),orient=cross(da[0].axis,sub(b.vertices[0],a.vertices[0]))>0 ? 1 : -1;
-                var m=match(a,b,da,db,orient,"angular open connector / butt caps / miter joins");
+                var m=match(a,b,da,db,orient,"angular open connector / butt caps / miter joins"),caps=m.thickness.slice(0);
                 for(var side=0;side<2;side++) {
                     var index=side ? a.vertices.length-1 : 0,edge=side ? da.length-1 : 0,v=sub(b.vertices[index],a.vertices[index]);
-                    if(Math.abs(dot(v,da[edge].axis))>Math.max(0.005,m.width*0.0005) || Math.abs(length(v)-m.width)>Math.max(0.005,m.width*0.05))fail("Connector ends must be perpendicular butt caps.");
+                    if(Math.abs(dot(v,da[edge].axis))>Math.max(0.005,m.width*0.0005))fail("Connector ends must be perpendicular butt caps.");
+                    caps.push(length(v));
                 }
+                // Cap lengths are thickness measurements too: they share the same edge-shift bound.
+                var measured=uniform(caps);m.width=measured.width;m.fitError=Math.max(m.fitError,measured.error);
                 if(found)fail("Ambiguous connector centerline.");found=m;
             } catch(e) {if(e.toString().indexOf("Ambiguous connector")>=0)throw e;}
         }
@@ -427,7 +443,10 @@ var PedroStrokeGeometry = (function () {
         } catch(error) {
             try {return PedroStrokeCircular.arc(s);} catch(arcError) {
                 try {return PedroStrokeCircular.roundArc(s);}catch(roundError){
-                    try {return PedroStrokeOutlines.openBand(s);}catch(bandError){throw error;}
+                    try {return PedroStrokeOutlines.openBand(s);}catch(bandError){
+                        // The first failed check alone can name an unrelated family (e.g. capsule for a star).
+                        fail("Unsupported shape: not a straight bar, capsule, circular arc band or uniform angular connector. Rings and frames need two paths and one fill in the same group.\nDetail: "+error.message);
+                    }
                 }
             }
         }
@@ -500,6 +519,10 @@ var PedroStrokeHost = (function () {
             var shapes=[];
             for(var pi=0;pi<2;pi++) {
                 if(found.paths[pi].matchName!=="ADBE Vector Shape - Group") fail("Frame contours must be Bezier paths. Convert native shapes to Bezier first.");
+                // AE stores 1 or 2 for normal paths and 3 for Reverse Path Direction. Reversal flips
+                // the winding the fill rule sees, which the recognizers read from the vertex order.
+                var direction=found.paths[pi].property("ADBE Vector Shape Direction");
+                if(direction && direction.value===3) fail("Reverse Path Direction is on for a ring/frame path. It changes which area is filled: turn it off (switch the Fill Rule to Even-Odd if the hole disappears) and run again.");
                 shapes.push(found.paths[pi].property("ADBE Vector Shape").value);
             }
             var rule=found.fill.property("ADBE Vector Fill Rule");
@@ -540,7 +563,7 @@ var PedroStrokeHost = (function () {
         var c=contentsAt(copy,plan.chain);
         for(var i=c.numProperties;i>=1;i--) c.property(i).remove();
         var path=c.addProperty("ADBE Vector Shape - Group");path.name="Recovered Centerline";
-        var data=PedroStrokeCircular.path(plan.geometry,options.reverse);
+        var data=PedroStrokeCircular.path(plan.geometry,false);
         path.property("ADBE Vector Shape").setValue(shape(data));
         // Indexed groups invalidate property handles after addProperty: reacquire each time.
         var stroke=contentsAt(copy,plan.chain).addProperty("ADBE Vector Graphic - Stroke");
@@ -577,7 +600,7 @@ var PedroStrokeHost = (function () {
         options=options || {};
         var action=options.originalAction || "disable";
         if(action!=="disable" && action!=="delete") fail("Original action must be disable or delete.");
-        options={originalAction:action,reverse:options.reverse,animate:options.animate,frames:options.frames};
+        options={originalAction:action,animate:options.animate,frames:options.frames};
         if(options.animate && (!/^[1-9][0-9]*$/.test(String(options.frames)) || Number(options.frames)>10000)) fail("Draw-on duration must be 1–10000 whole frames.");
         var results=analyze(layers),plans=[],i;
         for(i=0;i<results.length;i++) {
@@ -627,11 +650,12 @@ var PedroStrokeHost = (function () {
 // Stores options only, never project content. One strict record avoids partial writes.
 var PedroStrokeSettings = (function () {
     var section="PedroMafra.ShapeToStroke",key="options_v1";
-    function defaults() {return {originalAction:"disable",animate:false,reverse:false};}
+    function defaults() {return {originalAction:"disable",animate:false};}
     function decode(value) {
-        if(typeof value!=="string" || !/^v1\|(disable|delete)\|[01]\|[01]$/.test(value)) return defaults();
+        // v1 records also stored the removed Reverse option: keep their other two choices.
+        if(typeof value!=="string" || !/^(v2\|(disable|delete)\|[01]|v1\|(disable|delete)\|[01]\|[01])$/.test(value)) return defaults();
         var fields=value.split("|");
-        return {originalAction:fields[1],animate:fields[2]==="1",reverse:fields[3]==="1"};
+        return {originalAction:fields[1],animate:fields[2]==="1"};
     }
     function read(api) {
         try {api=api || app.settings;return api.haveSetting(section,key) ? decode(api.getSetting(section,key)) : defaults();}
@@ -640,7 +664,7 @@ var PedroStrokeSettings = (function () {
     function write(options,api) {
         try {
             api=api || app.settings;
-            var value="v1|"+(options.originalAction==="delete" ? "delete" : "disable")+"|"+(options.animate ? "1" : "0")+"|"+(options.reverse ? "1" : "0");
+            var value="v2|"+(options.originalAction==="delete" ? "delete" : "disable")+"|"+(options.animate ? "1" : "0");
             api.saveSetting(section,key,value);return true;
         } catch(e) {
             // Saving a preference must not turn a successful layer edit into a reported failure.
@@ -662,14 +686,12 @@ function showStrokePrototype() {
     var action=original.add("dropdownlist",undefined,["Keep disabled","Delete"]);action.selection=saved.originalAction==="delete" ? 1 : 0;
     var animate=win.add("checkbox",undefined,"Animate Trim Paths");
     animate.value=saved.animate;
-    var reverse=win.add("checkbox",undefined,"Reverse");
-    reverse.value=saved.reverse;
     var buttons=win.add("group");buttons.alignment="right";
     var create=buttons.add("button",undefined,"Create",{name:"ok"});
     buttons.add("button",undefined,"Cancel",{name:"cancel"});
     create.onClick=function(){
         try {
-            var options={reverse:reverse.value,animate:animate.value,frames:12,originalAction:action.selection.index===1 ? "delete" : "disable"};
+            var options={animate:animate.value,frames:12,originalAction:action.selection.index===1 ? "delete" : "disable"};
             PedroStrokeHost.create(comp,comp.selectedLayers,options);
             PedroStrokeSettings.write(options);
             win.close(1);

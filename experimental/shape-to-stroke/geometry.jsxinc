@@ -116,7 +116,10 @@ var PedroStrokeGeometry = (function () {
         } catch(error) {
             try {return PedroStrokeCircular.arc(s);} catch(arcError) {
                 try {return PedroStrokeCircular.roundArc(s);}catch(roundError){
-                    try {return PedroStrokeOutlines.openBand(s);}catch(bandError){throw error;}
+                    try {return PedroStrokeOutlines.openBand(s);}catch(bandError){
+                        // The first failed check alone can name an unrelated family (e.g. capsule for a star).
+                        fail("Unsupported shape: not a straight bar, capsule, circular arc band or uniform angular connector. Rings and frames need two paths and one fill in the same group.\nDetail: "+error.message);
+                    }
                 }
             }
         }

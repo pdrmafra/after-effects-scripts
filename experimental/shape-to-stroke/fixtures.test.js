@@ -2,8 +2,11 @@
 const fs=require("node:fs"),vm=require("node:vm"),test=require("node:test"),assert=require("node:assert/strict");
 function context() {const c=vm.createContext({});for(const f of ["circular.jsxinc","outlines.jsxinc","geometry.jsxinc","fixtures.jsxinc"])vm.runInContext(fs.readFileSync(__dirname+"/"+f,"utf8"),c);return c;}
 const entries=vm.runInContext("PedroStrokeFixtures.catalog()",context());
-test("catalog exposes 48 READY and 25 SKIP cases with unique names",()=>{
-  assert.equal(entries.filter(e=>e.expected).length,48);assert.equal(entries.filter(e=>!e.expected).length,25);assert.equal(new Set(entries.map(e=>e.name)).size,73);
+test("catalog exposes 48 READY, 25 SKIP and 33 icon-part cases with unique names",()=>{
+  const icons=entries.filter(e=>e.options.icon);
+  assert.equal(entries.filter(e=>e.expected && !e.options.icon).length,48);assert.equal(entries.filter(e=>!e.expected).length,25);
+  assert.equal(icons.length,33);assert.ok(icons.every(e=>e.expected));assert.equal(new Set(icons.map(e=>e.options.icon)).size,16);
+  assert.equal(new Set(entries.map(e=>e.name)).size,106);
 });
 for(let i=0;i<entries.length;i++)test(`fixture catalog: ${entries[i].name}`,()=>{
   const c=context();

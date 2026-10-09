@@ -204,6 +204,40 @@ var PedroStrokeFixtures = (function () {
         add("Overlapping round arc caps",false,false,false,0,false,{data:roundBand(85,55,0,350*Math.PI/180)});
         add("Acute triangle frame",true,false,false,0,false,polygonFrame([[0,-80],[20,80],[-20,80]],10));
         add("Thin 2-unit square frame",true,false,false,0,false,polygonFrame(square,2));
+        // Everyday icons built only from supported families. Parts of one icon are separate layers
+        // sharing a demo cell, as when an imported icon has been split into layers.
+        function icon(name,part,data,extraPath){add("Icon "+name+(part ? " / "+part : ""),true,false,false,0,false,{data:data,extraPath:extraPath,icon:name});}
+        function frameIcon(name,part,points,width){var f=polygonFrame(points,width);icon(name,part,f.data,f.extraPath);}
+        function bar(length,width,angle,center,rounded){return PedroStrokeGeometry.fixture(length,width,!!rounded,angle,center);}
+        function ringIcon(name,part,radius,width){icon(name,part,ellipse(2*radius+width,2*radius+width),reverse(ellipse(2*radius-width,2*radius-width)));}
+        function arcIcon(radius,width,start,sweep,center){return translate(roundBand(radius+width/2,radius-width/2,start,sweep),center);}
+        frameIcon("House","walls and roof",[[-60,80],[-60,-5],[0,-65],[25,-40],[25,-62],[45,-62],[45,-20],[60,-5],[60,80]],8);
+        icon("House","door",connector([[-15,80],[-15,40],[15,40],[15,80]],8));
+        icon("Check mark","",connector([[-60,5],[-20,45],[65,-50]],16));
+        icon("Heartbeat","",connector([[-95,10],[-50,10],[-32,-30],[-8,55],[18,-60],[38,10],[95,10]],7));
+        for(var wi=0;wi<3;wi++)icon("Wi-Fi",["small","medium","large"][wi]+" arc",arcIcon(25+wi*30,14,-3*Math.PI/4,Math.PI/2,[0,55]));
+        ringIcon("Clock","face",70,10);
+        icon("Clock","hour hand",bar(50,10,90,[0,-20],true));
+        icon("Clock","minute hand",bar(60,10,0,[25,0],true));
+        var body=roundedFrame(140,70,12,8);icon("Battery","body",body.data,body.extraPath);
+        icon("Battery","terminal",bar(30,12,90,[80,0],true));
+        for(var bi=0;bi<3;bi++)icon("Battery","charge "+(bi+1),bar(46,18,90,[-45+bi*25,0],false));
+        icon("Gauge","dial",translate(band(85,71,3*Math.PI/4,3*Math.PI/2),[0,10]));
+        icon("Gauge","needle",bar(62,8,-55,[28*Math.cos(-55*Math.PI/180),10+28*Math.sin(-55*Math.PI/180)],false));
+        icon("Lightning","",connector([[25,-85],[-30,5],[30,-5],[-25,85]],12));
+        icon("Letter M","",connector([[-65,70],[-65,-65],[0,25],[65,-65],[65,70]],12));
+        icon("Arrow","shaft",bar(140,12,0,[-11,0],false));
+        icon("Arrow","head",connector([[15,-45],[60,0],[15,45]],12));
+        frameIcon("Speech bubble","",[[-90,-60],[90,-60],[90,30],[-10,30],[-40,68],[-40,30],[-90,30]],8);
+        frameIcon("Plus","",[[-22,-70],[22,-70],[22,-22],[70,-22],[70,22],[22,22],[22,70],[-22,70],[-22,22],[-70,22],[-70,-22],[-22,-22]],8);
+        frameIcon("Shield","",[[0,-80],[68,-58],[60,15],[0,82],[-60,15],[-68,-58]],10);
+        ringIcon("Smiley","face",75,8);
+        icon("Smiley","left eye",bar(26,12,90,[-25,-20],true));
+        icon("Smiley","right eye",bar(26,12,90,[25,-20],true));
+        icon("Smiley","smile",arcIcon(43,12,Math.PI/6,2*Math.PI/3,[0,5]));
+        for(var mi=0;mi<3;mi++)icon("Menu","line "+(mi+1),bar(120,14,0,[0,-35+mi*35],true));
+        ringIcon("Play","circle",70,8);
+        frameIcon("Play","triangle",[[-22,-35],[38,0],[-22,35]],8);
         return cases;
     }
     function fromCase(comp,entry,name) {return source(comp,name || entry.name,entry.parametric,entry.rounded,entry.angle,entry.nested,entry.options);}
@@ -212,10 +246,10 @@ var PedroStrokeFixtures = (function () {
         try {
             for(var section=0;section<2;section++) {
                 var expected=section===0,total=0;
-                for(var ei=0;ei<entries.length;ei++)if(entries[ei].expected===expected)total++;
+                for(var ei=0;ei<entries.length;ei++)if(entries[ei].expected===expected && !entries[ei].options.icon)total++;
                 var c=app.project.items.addComp("Shape to Stroke v0.0.5 "+(expected ? "READY" : "SKIP")+" "+new Date().getTime(),1200,Math.ceil(total/3)*240+80,1,4,24);
                 created.push(c);if(expected)ready=c;var count=0;
-                for(var i=0;i<entries.length;i++) if(entries[i].expected===expected) {
+                for(var i=0;i<entries.length;i++) if(entries[i].expected===expected && !entries[i].options.icon) {
                     var name=(count+1<10 ? "0" : "")+(count+1)+" "+(expected ? "READY" : "SKIP")+" - "+entries[i].name;
                     var f=fromCase(c,entries[i],name);
                     f.layer.property("ADBE Transform Group").property("ADBE Position").setValue([200+(count%3)*400,140+Math.floor(count/3)*240]);
@@ -223,6 +257,18 @@ var PedroStrokeFixtures = (function () {
                 }
                 c.time=0;
             }
+            // Icons: every part of one icon shares a 270-pixel cell in a four-column grid.
+            var icons=app.project.items.addComp("Shape to Stroke v0.0.5 ICONS "+new Date().getTime(),1080,1080,1,4,24),cells=[];
+            created.push(icons);
+            for(i=0;i<entries.length;i++) if(entries[i].options.icon) {
+                var cell=-1;
+                for(var ci=0;ci<cells.length;ci++)if(cells[ci]===entries[i].options.icon)cell=ci;
+                if(cell<0){cells.push(entries[i].options.icon);cell=cells.length-1;}
+                var part=fromCase(icons,entries[i],(cell+1<10 ? "0" : "")+(cell+1)+" ICON - "+entries[i].name.replace(/^Icon /,""));
+                part.layer.property("ADBE Transform Group").property("ADBE Position").setValue([135+(cell%4)*270,135+Math.floor(cell/4)*270]);
+                part.layer.selected=false;
+            }
+            icons.time=0;
             ready.layer(ready.numLayers).selected=true;
             return {comps:created,ready:ready};
         } catch(error) {
