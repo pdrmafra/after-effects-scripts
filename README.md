@@ -11,7 +11,15 @@ Free tools from my motion-design workflow. By [Pedro Mafra](https://pedromafra.c
 | **Shape to Stroke** *(experimental)* | Turns filled outline shapes into editable strokes you can animate with Trim Paths. | [Guide](experimental/shape-to-stroke/README.md) |
 | **Depth Map** *(advanced, macOS)* | Generates depth-map images from stills or short comp sequences with local AI models. Needs a Python setup. | [Setup](depth-map/README.md) |
 
+## See them in action
+
+**[Shape to Stroke](experimental/shape-to-stroke/README.md)** finds the path running through the middle of a filled shape and gives it a stroke that fills it.
+
 [![Shape to Stroke: the outline of a filled shape, the path the script finds through its middle, and the stroke that fills it](docs/media/shape-to-stroke.gif)](experimental/shape-to-stroke/README.md)
+
+**[Transform to Null](docs/transform-to-null.md)** moves a layer's animation to a new parent null, so the layer can get its own motion on top.
+
+[![Transform to Null: a layer's Position animation moves to a new parent null; the layer then gets its own motion on top](docs/media/transform-to-null.gif)](docs/transform-to-null.md)
 
 ## Install
 
