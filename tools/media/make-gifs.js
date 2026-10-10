@@ -2,7 +2,7 @@
 // Regenerates the illustrative GIFs in docs/media: SVG frames -> headless Chrome/Edge -> ffmpeg.
 // Needs Node 22+ (built-in WebSocket), ffmpeg and Chrome, Chromium or Edge. Usage: npm run media [-- name...]
 const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),{spawn,execFileSync}=require("node:child_process");
-const scenes=[require("./shape-to-stroke"),require("./transform-to-null")];
+const scenes=[require("./shape-to-stroke"),require("./transform-to-null"),require("./keyframe-tools")];
 const target=path.join(__dirname,"../../docs/media");
 
 function findBrowser() {

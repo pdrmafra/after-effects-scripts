@@ -5,8 +5,7 @@ Free tools from my motion-design workflow. By [Pedro Mafra](https://pedromafra.c
 | Tool | What it does | Guide |
 | --- | --- | --- |
 | **Transform to Null** | Moves a layer's position, scale and rotation animation onto a new parent null, so you can add a second layer of motion on top. | [Guide](docs/transform-to-null.md) |
-| **Spacing Keyframes** | Spaces the selected keyframes an exact number of frames apart. | [Guide](docs/keyframes.md#spacing-keyframes) |
-| **Stepped Keyframes** | Adds keys every few frames between the selected ones, optionally with Hold for a stepped, stop-motion feel. | [Guide](docs/keyframes.md#stepped-keyframes) |
+| **Keyframe Tools** *(new)* | One compact dockable panel: space, step and thin out keys, move keys to a layer's in or out point, and trim layers to their keys. | [Guide](docs/keyframe-tools.md) |
 | **Font Inspector** | Lists every font used in a comp and its precomps, and jumps to each layer that uses it. | [Guide](docs/font-inspector.md) |
 | **Shape to Stroke** *(experimental)* | Turns filled outline shapes into editable strokes you can animate with Trim Paths. | [Guide](experimental/shape-to-stroke/README.md) |
 | **Depth Map** *(advanced, macOS)* | Generates depth-map images from stills or short comp sequences with local AI models. Needs a Python setup. | [Setup](depth-map/README.md) |
@@ -16,6 +15,10 @@ Free tools from my motion-design workflow. By [Pedro Mafra](https://pedromafra.c
 **[Shape to Stroke](experimental/shape-to-stroke/README.md)** finds the path running through the middle of a filled shape and gives it a stroke that fills it.
 
 [![Shape to Stroke: the outline of a filled shape, the path the script finds through its middle, and the stroke that fills it](docs/media/shape-to-stroke.gif)](experimental/shape-to-stroke/README.md)
+
+**[Keyframe Tools](docs/keyframe-tools.md)** spaces, steps and thins out keys, moves them to a layer's in or out point, and trims layers to their keys, from one compact panel.
+
+[![Keyframe Tools: each button in turn and its effect on a layer and its Position keys](docs/media/keyframe-tools.gif)](docs/keyframe-tools.md)
 
 **[Transform to Null](docs/transform-to-null.md)** moves a layer's animation to a new parent null, so the layer can get its own motion on top.
 
@@ -32,6 +35,8 @@ Each file in `Scripts` works on its own; there is nothing else to install. To ke
 - Windows: `C:\Program Files\Adobe\Adobe After Effects <version>\Support Files\Scripts`
 
 They also work as KBar buttons. Font Inspector's **Save Report** and Depth Map need **Allow Scripts to Write Files and Access Network** (Settings or Preferences → Scripting & Expressions).
+
+Keyframe Tools is a panel: copy `Keyframe-Tools.jsx` into the **ScriptUI Panels** folder inside that Scripts folder, restart AE and open it from the **Window** menu. See its [guide](docs/keyframe-tools.md).
 
 Depth Map is different: keep its whole `depth-map` folder and follow its [setup guide](depth-map/README.md) first.
 

@@ -1,0 +1,150 @@
+// Dockable panel (ScriptUI Panels folder) or floating window (Run Script File).
+// A KBar button can run one action directly by passing its name as the button argument.
+var KeyframeTools = (function () {
+    var SECTION = "PedroMafra.KeyframeTools", KEY = "options_v1";
+    // One whole number N: frames for Space and Step, keys for Keep.
+    function decode(value) {
+        // v1 also stored options the panel no longer has; v3 had a frames/seconds unit (frames kept).
+        var match = typeof value === "string" ? (/^v2\|([1-9][0-9]{0,4})$/.exec(value) || /^v3\|f\|([1-9][0-9]{0,4})$/.exec(value) ||
+            /^v1\|([1-9][0-9]{0,4})\|[01]\|[01]\|[01]$/.exec(value)) : null;
+        return { amount: match ? match[1] : "2" };
+    }
+    function readOptions() {
+        try { return app.settings.haveSetting(SECTION, KEY) ? decode(app.settings.getSetting(SECTION, KEY)) : decode(null); }
+        catch (e) { return decode(null); }
+    }
+    function saveOptions(options) {
+        // Only a valid number is remembered; a bad entry still reaches the action and is refused there.
+        if (!/^[1-9][0-9]{0,4}$/.test(String(options.amount))) return;
+        try { app.settings.saveSetting(SECTION, KEY, "v2|" + options.amount); } catch (e) {}
+    }
+    var actions = {
+        "space": function (c, o) { PedroAE.space(c, o.amount, false, false); },
+        "step": function (c, o) { PedroAE.step(c, o.amount, false); },
+        "keep": function (c, o) { PedroAE.keepEvery(c, o.amount); },
+        "keys-in": function (c) { PedroAE.keysToLayer(c, "in"); },
+        "keys-out": function (c) { PedroAE.keysToLayer(c, "out"); },
+        "trim-in": function (c) { PedroAE.trimToKeys(c, "in"); },
+        "trim-out": function (c) { PedroAE.trimToKeys(c, "out"); },
+        "trim-both": function (c) { PedroAE.trimToKeys(c, "both"); }
+    };
+    function perform(name, options) {
+        if (!actions.hasOwnProperty(name)) throw new Error("Unknown action: " + name + ". Use space, step, keep, keys-in, keys-out, trim-in, trim-out or trim-both.");
+        actions[name](PedroAE.comp(), options);
+    }
+
+    // Icons live in a 100 x 60 box, like Pedro's Keys-to-in/out SVGs: a gray layer bar and key diamonds.
+    // ["bar", x, y, w, h, tone] · ["key", cx, cy, radius, filled, tone?] · ["line", x1, y1, x2, y2, width, tone]
+    var ICONS = {
+        "space": [["line", 12, 50, 88, 50, 2, "icon"], ["line", 12, 44, 12, 56, 2, "icon"], ["line", 37, 46, 37, 54, 2, "icon"], ["line", 63, 46, 63, 54, 2, "icon"], ["line", 88, 44, 88, 56, 2, "icon"],
+            ["key", 12, 26, 9, true], ["key", 37, 26, 9, true], ["key", 63, 26, 9, true], ["key", 88, 26, 9, true]],
+        "step": [["key", 12, 30, 10, true], ["key", 37, 30, 8, false], ["key", 63, 30, 8, false], ["key", 88, 30, 10, true]],
+        "keep": [["key", 10, 30, 9, true], ["key", 30, 30, 5, true, "dim"], ["key", 50, 30, 9, true], ["key", 70, 30, 5, true, "dim"], ["key", 90, 30, 9, true]],
+        "keys-in": [["bar", 5, 10, 90, 10, "icon"], ["key", 15, 40, 10, true], ["key", 45, 40, 10, true]],
+        "keys-out": [["bar", 5, 10, 90, 10, "icon"], ["key", 55, 40, 10, true], ["key", 85, 40, 10, true]],
+        "trim-in": [["bar", 5, 10, 20, 10, "dim"], ["bar", 25, 10, 70, 10, "icon"], ["line", 25, 3, 25, 57, 3, "cut"], ["key", 25, 40, 10, true], ["key", 60, 40, 10, true]],
+        "trim-out": [["bar", 5, 10, 70, 10, "icon"], ["bar", 75, 10, 20, 10, "dim"], ["line", 75, 3, 75, 57, 3, "cut"], ["key", 40, 40, 10, true], ["key", 75, 40, 10, true]],
+        "trim-both": [["bar", 5, 10, 12, 10, "dim"], ["bar", 17, 10, 66, 10, "icon"], ["bar", 83, 10, 12, 10, "dim"], ["line", 17, 3, 17, 57, 3, "cut"], ["line", 83, 3, 83, 57, 3, "cut"], ["key", 17, 40, 10, true], ["key", 83, 40, 10, true]]
+    };
+    var TONES = { icon: [0.66, 0.66, 0.66, 1], dim: [0.32, 0.32, 0.32, 1], cut: [0.85, 0.85, 0.85, 1] };
+    var TIPS = {
+        "space": "Space: spaces the selected keys N frames apart",
+        "step": "Step: adds keys every N frames between the selected keys",
+        "keep": "Keep: keeps every Nth selected key and removes the ones between (the first and last stay)",
+        "keys-in": "Keys to layer in: moves the selected keys so the first one sits on the layer's in point",
+        "keys-out": "Keys to layer out: moves the selected keys so the last one sits on the layer's last frame",
+        "trim-in": "Trim in: the layer starts on its first keyframe",
+        "trim-out": "Trim out: the layer ends after its last keyframe",
+        "trim-both": "Trim both: the layer spans from its first to its last keyframe"
+    };
+    function drawButton(button, shapes, state) {
+        var g = button.graphics, w = button.size[0], h = button.size[1];
+        var fill = state && state.leftButtonPressed ? 0.12 : (state && state.mouseOver ? 0.24 : 0.18);
+        g.newPath(); g.rectPath(0, 0, w, h);
+        g.fillPath(g.newBrush(g.BrushType.SOLID_COLOR, [fill, fill, fill, 1]));
+        g.strokePath(g.newPen(g.PenType.SOLID_COLOR, [0.29, 0.29, 0.29, 1], 1));
+        var scale = Math.min((w - 10) / 100, (h - 6) / 60), left = (w - 100 * scale) / 2, top = (h - 60 * scale) / 2;
+        function x(v) { return left + v * scale; }
+        function y(v) { return top + v * scale; }
+        for (var i = 0; i < shapes.length; i++) {
+            var s = shapes[i];
+            g.newPath();
+            if (s[0] === "bar") {
+                g.rectPath(x(s[1]), y(s[2]), s[3] * scale, s[4] * scale);
+                g.fillPath(g.newBrush(g.BrushType.SOLID_COLOR, TONES[s[5]]));
+            } else if (s[0] === "key") {
+                g.moveTo(x(s[1]), y(s[2] - s[3])); g.lineTo(x(s[1] + s[3]), y(s[2])); g.lineTo(x(s[1]), y(s[2] + s[3])); g.lineTo(x(s[1] - s[3]), y(s[2])); g.closePath();
+                var tone = TONES[s[5] || "icon"];
+                if (s[4]) g.fillPath(g.newBrush(g.BrushType.SOLID_COLOR, tone));
+                else g.strokePath(g.newPen(g.PenType.SOLID_COLOR, tone, Math.max(1, 2.4 * scale)));
+            } else {
+                g.moveTo(x(s[1]), y(s[2])); g.lineTo(x(s[3]), y(s[4]));
+                g.strokePath(g.newPen(g.PenType.SOLID_COLOR, TONES[s[6]], Math.max(1, s[5] * scale)));
+            }
+        }
+    }
+    function kbarArgument() {
+        try { if (typeof kbar !== "undefined" && kbar && kbar.button && kbar.button.argument) return String(kbar.button.argument).replace(/^\s+|\s+$/g, "").toLowerCase(); }
+        catch (e) {}
+        return "";
+    }
+    var BUTTON = [48, 28], GAP = 4, MARGIN = 8;
+    // Lays out equal tiles in the most columns that fit, but only in counts that fill every row:
+    // 9 tiles become a column, a 3 x 3 square or a single row, never a row with one tile left over.
+    function flow(count, width) {
+        var fit = Math.max(1, Math.floor((width + GAP) / (BUTTON[0] + GAP))), columns = 1, places = [], c, i;
+        for (c = 1; c <= count; c++) if (count % c === 0 && c <= fit) columns = c;
+        var left = Math.max(0, (width - (columns * BUTTON[0] + (columns - 1) * GAP)) / 2);
+        for (i = 0; i < count; i++) places.push([left + (i % columns) * (BUTTON[0] + GAP), Math.floor(i / columns) * (BUTTON[1] + GAP)]);
+        return places;
+    }
+    function buildPanel(host) {
+        var win = host instanceof Panel ? host : new Window("palette", "Keyframes", undefined, { resizeable: true });
+        win.orientation = "column"; win.alignChildren = ["center", "top"]; win.spacing = GAP; win.margins = MARGIN;
+
+        // The N field is one more tile in the grid, the same size as the buttons.
+        var amount = win.add("edittext", undefined, readOptions().amount);
+        amount.preferredSize = BUTTON; amount.justify = "center";
+        // The default font looks tiny in a button-sized field.
+        try { amount.graphics.font = ScriptUI.newFont(amount.graphics.font.name, ScriptUI.FontStyle.REGULAR, 16); } catch (e) {}
+        amount.helpTip = "N: frames for Space and Step, keys for Keep";
+        function options() { return { amount: amount.text }; }
+        amount.onChange = function () { saveOptions(options()); };
+
+        var order = ["space", "step", "keep", "keys-in", "keys-out", "trim-in", "trim-out", "trim-both"], controls = [amount];
+        for (var i = 0; i < order.length; i++) (function (name) {
+            var button = win.add("iconbutton", undefined, undefined, { style: "toolbutton" });
+            button.preferredSize = BUTTON;
+            button.helpTip = TIPS[name];
+            button.onDraw = function (state) { drawButton(this, ICONS[name], state); };
+            button.onClick = function () {
+                var chosen = options();
+                saveOptions(chosen);
+                // Success shows in the timeline itself; only refusals interrupt.
+                try { perform(name, chosen); } catch (error) { alert(error.toString(), "Keyframe Tools"); }
+            };
+            controls.push(button);
+        })(order[i]);
+
+        // Like Nudge, the tiles follow the panel's shape instead of a fixed column.
+        function arrange() {
+            var places = flow(controls.length, Math.max(BUTTON[0], win.size[0] - 2 * MARGIN));
+            for (var c = 0; c < controls.length; c++) {
+                controls[c].location = [MARGIN + places[c][0], MARGIN + places[c][1]];
+                controls[c].size = BUTTON;
+            }
+        }
+        win.onResizing = win.onResize = win.onShow = arrange;
+        win.layout.layout(true);
+        arrange();
+        if (win instanceof Window) { win.center(); win.show(); }
+        return win;
+    }
+    function start(host) {
+        var argument = kbarArgument();
+        if (argument) { PedroAE.run("Keyframe Tools", function () { perform(argument, readOptions()); }); return null; }
+        return buildPanel(host);
+    }
+    return { start: start, perform: perform, decode: decode, icons: ICONS, drawButton: drawButton, flow: flow };
+}());
+KeyframeTools.start(thisObj);

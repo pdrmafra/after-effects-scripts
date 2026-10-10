@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0-beta.1 — 2026-10-10
+
+- Spacing Keyframes and Stepped Keyframes are now part of Keyframe Tools; the separate scripts and their guide were removed.
+- Add Keyframe Tools: a compact dockable ScriptUI panel with icon buttons for Space, Step, Keep every Nth key, keys to layer in/out and trim layers to their keys (in, out or both), plus KBar arguments for each action. Its tiles rearrange into a column, a 3 × 3 square or a single row to fit the panel, never leaving one tile alone. It replaces Pedro's separate Key To In/Out and Trim scripts with safer versions: preflight, collision checks, one Undo group and rollback.
+- Trimming ignores layer markers and keeps the last key's frame inside the layer; keys to layer out lands on the layer's last visible frame.
+
 ## 0.2.0-beta.1 — 2026-10-09
 
 - Add Shape to Stroke as an explicitly experimental standalone tool, with one canonical build and no version-suffixed copies.

@@ -8,7 +8,7 @@ if(git(["status","--porcelain"]).trim() && !process.argv.includes("--allow-dirty
 
 const repo="https://github.com/pdrmafra/after-effects-scripts/blob/main/";
 const files=[
-  ...["Transform-to-Null","Spacing-Keyframes","Stepped-Keyframes","Font-Inspector"].map(n=>[`scripts/${n}.jsx`,`Scripts/${n}.jsx`]),
+  ...["Transform-to-Null","Keyframe-Tools","Font-Inspector"].map(n=>[`scripts/${n}.jsx`,`Scripts/${n}.jsx`]),
   ["experimental/shape-to-stroke/Shape-to-Stroke.jsx","Scripts/Shape-to-Stroke.jsx"],
   ...["Create-Test-Fixtures.jsx","circular.jsxinc","outlines.jsxinc","geometry.jsxinc","host.jsxinc","fixtures.jsxinc"].map(f=>[`experimental/shape-to-stroke/${f}`,`Shape to Stroke test comps/${f}`]),
   // Tracked files only: the local Python environment, vendor checkouts and weights are never shipped.
@@ -24,7 +24,9 @@ INSTALL
 2. To keep them in the File > Scripts menu, copy them into After Effects' Scripts folder and restart AE:
    macOS:   /Applications/Adobe After Effects <version>/Scripts
    Windows: C:\\Program Files\\Adobe\\Adobe After Effects <version>\\Support Files\\Scripts
-3. Font Inspector's Save Report and Depth Map need "Allow Scripts to Write Files and Access Network"
+3. Keyframe Tools is a panel: copy Keyframe-Tools.jsx into the "ScriptUI Panels" folder inside that Scripts
+   folder, restart AE and open it from the Window menu.
+4. Font Inspector's Save Report and Depth Map need "Allow Scripts to Write Files and Access Network"
    (Settings or Preferences > Scripting & Expressions).
 
 BEFORE YOU USE THEM
@@ -33,13 +35,13 @@ BEFORE YOU USE THEM
 - Shape to Stroke is experimental. Depth Map is advanced (macOS, needs a Python setup).
 
 WHAT'S INSIDE
-Scripts/                     Transform to Null, Spacing Keyframes, Stepped Keyframes, Font Inspector, Shape to Stroke
+Scripts/                     Transform to Null, Keyframe Tools, Font Inspector, Shape to Stroke
 Shape to Stroke test comps/  Run Create-Test-Fixtures.jsx to add READY, SKIP and ICONS test comps. Keep these files together.
 depth-map/                   Keep the whole folder; follow depth-map/README.md before running jsx/DepthMapStatic.jsx.
 
 GUIDES
 Transform to Null   ${repo}docs/transform-to-null.md
-Keyframe tools      ${repo}docs/keyframes.md
+Keyframe Tools      ${repo}docs/keyframe-tools.md
 Font Inspector      ${repo}docs/font-inspector.md
 Shape to Stroke     ${repo}experimental/shape-to-stroke/README.md
 Depth Map           ${repo}depth-map/README.md

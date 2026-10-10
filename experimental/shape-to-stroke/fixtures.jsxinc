@@ -247,7 +247,7 @@ var PedroStrokeFixtures = (function () {
             for(var section=0;section<2;section++) {
                 var expected=section===0,total=0;
                 for(var ei=0;ei<entries.length;ei++)if(entries[ei].expected===expected && !entries[ei].options.icon)total++;
-                var c=app.project.items.addComp("Shape to Stroke v0.2.0-beta.1 "+(expected ? "READY" : "SKIP")+" "+new Date().getTime(),1200,Math.ceil(total/3)*240+80,1,4,24);
+                var c=app.project.items.addComp("Shape to Stroke v0.3.0-beta.1 "+(expected ? "READY" : "SKIP")+" "+new Date().getTime(),1200,Math.ceil(total/3)*240+80,1,4,24);
                 created.push(c);if(expected)ready=c;var count=0;
                 for(var i=0;i<entries.length;i++) if(entries[i].expected===expected && !entries[i].options.icon) {
                     var name=(count+1<10 ? "0" : "")+(count+1)+" "+(expected ? "READY" : "SKIP")+" - "+entries[i].name;
@@ -258,7 +258,7 @@ var PedroStrokeFixtures = (function () {
                 c.time=0;
             }
             // Icons: every part of one icon shares a 270-pixel cell in a four-column grid.
-            var icons=app.project.items.addComp("Shape to Stroke v0.2.0-beta.1 ICONS "+new Date().getTime(),1080,1080,1,4,24),cells=[];
+            var icons=app.project.items.addComp("Shape to Stroke v0.3.0-beta.1 ICONS "+new Date().getTime(),1080,1080,1,4,24),cells=[];
             created.push(icons);
             for(i=0;i<entries.length;i++) if(entries[i].options.icon) {
                 var cell=-1;

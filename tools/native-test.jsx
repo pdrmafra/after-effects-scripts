@@ -67,6 +67,29 @@
             assert(p.numKeys===7,"expected 5 samples, got "+(p.numKeys-2));
             for (t=0;t<=1;t+=1/96) assert(offCurve(p.valueAtTime(t,true))<0.5,"motion path left the original curve at "+t);
         });
+        test("keys to layer in / out keep spacing and use the last visible frame", function () {
+            var c=fresh(), layer=c.layers.addShape(), p=prop(layer,"ADBE Rotate Z");
+            layer.inPoint=1; layer.outPoint=5;
+            animated(p,[0,1.5,3],[0,10,30]); choose(p,[2,3]);
+            PedroAE.keysToLayer(c,"in");
+            assert(near(p.keyTime(1),0) && near(p.keyTime(2),1) && near(p.keyTime(3),2.5),"in shift wrong");
+            choose(p,[2,3]); PedroAE.keysToLayer(c,"out");
+            assert(near(p.keyTime(3),5-c.frameDuration) && near(p.keyTime(2),3.5-c.frameDuration) && p.keyValue(3)===30,"out shift wrong");
+        });
+        test("keep every 2nd selected key removes the ones between", function () {
+            var c=fresh(), layer=c.layers.addShape(), p=prop(layer,"ADBE Rotate Z");
+            animated(p,[0,0.25,0.5,0.75,1],[0,1,2,3,4]); choose(p,[1,2,3,4,5]);
+            var removed=PedroAE.keepEvery(c,2);
+            assert(removed===2 && p.numKeys===3 && p.keyValue(1)===0 && p.keyValue(2)===2 && p.keyValue(3)===4,"keep wrong: "+removed+" / "+p.numKeys);
+        });
+        test("trim to keys ignores markers and keeps the last key's frame", function () {
+            var c=fresh(), layer=c.layers.addShape(), p=prop(layer,"ADBE Rotate Z");
+            animated(p,[1,3],[0,90]); layer.property("ADBE Marker").setValueAtTime(6,new MarkerValue("not a key"));
+            for (var i=1;i<=c.numLayers;i++) c.layer(i).selected=false;
+            layer.selected=true;
+            PedroAE.trimToKeys(c,"both");
+            assert(near(layer.inPoint,1) && near(layer.outPoint,3+c.frameDuration),"trim bounds wrong: "+layer.inPoint+" / "+layer.outPoint);
+        });
         test("hold mode leaves last endpoint / outside keys unchanged", function () {
             var c=fresh(), layer=c.layers.addShape(), p=prop(layer,"ADBE Rotate Z");
             animated(p,[0,1,2,3],[0,10,20,30]); choose(p,[2,3]); PedroAE.step(c,12,true);
