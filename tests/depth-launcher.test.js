@@ -4,13 +4,15 @@ const vm = require("node:vm");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const source=fs.readFileSync(path.join(__dirname,"../depth-map/jsx/DepthMapStatic.jsx"),"utf8");
-const EXPOSED="depthTest={shellQuote:shellQuote,buildCommand:buildCommand,buildSequenceCommand:buildSequenceCommand,planFromSelection:planFromSelection,buildLaunchCommand:buildLaunchCommand,parseSequenceProgress:parseSequenceProgress,createStillJob:createStillJob,getProjectFolder:getProjectFolder,resultMessage:resultMessage,applyDepthReveal:applyDepthReveal,applyParallax:applyParallax,setOutputRoot:function(f){OUTPUT_ROOT=f;}};";
+const EXPOSED="depthTest={shellQuote:shellQuote,buildCommand:buildCommand,buildSequenceCommand:buildSequenceCommand,planFromSelection:planFromSelection,buildLaunchCommand:buildLaunchCommand,parseSequenceProgress:parseSequenceProgress,createStillJob:createStillJob,cachedDepthFile:cachedDepthFile,chooseOutputFolder:chooseOutputFolder,getOutputRoot:function(){return OUTPUT_ROOT;},getProjectFolder:getProjectFolder,resultMessage:resultMessage,applyDepthReveal:applyDepthReveal,applyParallax:applyParallax,addSweepLayer:addSweepLayer,setOutputRoot:function(f){OUTPUT_ROOT=f;}};";
 function helpers(){
   const c=vm.createContext({});
   vm.runInContext(`var disk={};
     function File(s){this.fsName=String(s);this.name=this.fsName.split("/").pop();this.displayName=this.name;this.parent={fsName:"/tool/jsx",parent:{fsName:"/tool"}};}
     Object.defineProperty(File.prototype,"exists",{get:function(){return !!disk[this.fsName];}});
     File.prototype.remove=function(){delete disk[this.fsName];return true;};
+    File.prototype.rename=function(n){var to=this.fsName.replace(/[^\/]+$/,n);disk[to]=disk[this.fsName];delete disk[this.fsName];this.fsName=to;this.name=n;return true;};
+    File.prototype.length=1000; File.prototype.modified=new Date(5000);
     File.prototype.open=function(){return true;};File.prototype.read=function(){return disk[this.fsName]||"";};File.prototype.close=function(){};
     function Folder(s){File.call(this,s);} Folder.prototype=Object.create(File.prototype);
     function FootageItem(file,still){this.file=file;this.mainSource=new FileSource(still);}
@@ -18,7 +20,12 @@ function helpers(){
     function CompItem(){}
     function KeyframeEase(speed,influence){this.speed=speed;this.influence=influence;}
     function fakeProperty(){return {values:[],keys:[],eases:0,setValue:function(v){this.values.push(v);},setValueAtTime:function(t,v){this.keys.push([t,v]);},get numKeys(){return this.keys.length;},setTemporalEaseAtKey:function(){this.eases++;}};}
-    function fakeLayer(index){var effects=[];return {index:index,enabled:true,guideLayer:true,effects:effects,property:function(n){return {canAddProperty:function(m){return true;},addProperty:function(m){var props=[fakeProperty(),fakeProperty(),fakeProperty(),fakeProperty(),fakeProperty(),fakeProperty()];var e={matchName:m,props:props,property:function(i){return props[i-1];}};effects.push(e);return e;}};}};}
+    // Like AE: adding an effect invalidates references to the layer's other effects; look them up again by name.
+    function fakeLayer(index){var effects=[];
+      function handle(e){var made=effects.length;return {matchName:e.matchName,props:e.props,get name(){return e.name;},set name(v){e.name=v;},property:function(i){if(effects.length!==made)throw new Error("Object is invalid");return e.props[i-1];}};}
+      var parade={canAddProperty:function(m){return true;},addProperty:function(m){var props=[fakeProperty(),fakeProperty(),fakeProperty(),fakeProperty(),fakeProperty(),fakeProperty()];var e={matchName:m,props:props,name:m};effects.push(e);return handle(e);},
+        property:function(n){for(var i=0;i<effects.length;i++)if(effects[i].name===n)return handle(effects[i]);return null;}};
+      return {index:index,enabled:true,guideLayer:true,effects:effects,property:function(n){return parade;}};}
     function FolderItem(name){this.name=name;}
     var processes={}, nextPid=100, calls=[], imported=[], undo=[];
     var system={callSystem:function(cmd){calls.push(cmd);
@@ -95,6 +102,56 @@ test("still job runs one image at a time, then imports all in one Undo",()=>{
   assert.deepEqual(JSON.parse(run(c,"JSON.stringify(undo)")),["begin Generate Depth Map","end"]);
   assert.equal(run(c,"Object.keys(disk).filter(function(k){return /\\.log$/.test(k);}).length"),0);  // logs cleaned
 });
+test("files always go into a Depth Maps folder on disk, also when the project is not saved",()=>{
+  const c=helpers();
+  run(c,`Folder.prototype.create=function(){disk[this.fsName]="dir";return true;}; var answers=[]; Folder.selectDialog=function(){return answers.shift()||null;}; var alert=function(){};`);
+  const root=()=>run(c,"depthTest.getOutputRoot().fsName");
+  run(c,'app.project={file:new File("/Jobs/Spot/spot.aep")}; app.project.file.parent=new Folder("/Jobs/Spot");');
+  assert.equal(run(c,"depthTest.chooseOutputFolder()"),true); assert.equal(root(),"/Jobs/Spot/Depth Maps");
+  run(c,'depthTest.setOutputRoot(null); app.project={file:null}; answers=[new Folder("/Users/pedro/Downloads")];');
+  assert.equal(run(c,"depthTest.chooseOutputFolder()"),true); assert.equal(root(),"/Users/pedro/Downloads/Depth Maps");
+  assert.equal(run(c,"depthTest.chooseOutputFolder()"),true); assert.equal(root(),"/Users/pedro/Downloads/Depth Maps");  // asked once per session
+  run(c,'depthTest.setOutputRoot(null); answers=[new Folder("/X/Depth Maps")];');
+  assert.equal(run(c,"depthTest.chooseOutputFolder()"),true); assert.equal(root(),"/X/Depth Maps");
+  run(c,'depthTest.setOutputRoot(null); answers=[];');
+  assert.equal(run(c,"depthTest.chooseOutputFolder()"),false);                                      // dialog cancelled
+});
+test("an image that already has a depth map at this quality reuses it without running Python",()=>{
+  const c=helpers(); stillJob(c,["a.png"]);
+  run(c,"job.tick();"); finishProcess(c); run(c,"while(job.tick()){}");
+  const first=run(c,"imported[0][0]");
+  assert.match(first,/^a_depth_518_[0-9a-f]{8}\.png$/);
+  run(c,"calls=[]; imported=[];"); stillJob(c,["a.png"]); run(c,"while(job.tick()){}");
+  assert.equal(run(c,"calls.filter(function(x){return /^nohup/.test(x);}).length"),0);
+  assert.equal(run(c,"imported[0][0]"),first);
+  assert.match(run(c,"job.result.message"),/already existed .*reused\. Option-click Generate/);
+});
+test("Option-click regenerates and replaces the cached file only when the new one is complete",()=>{
+  const c=helpers(); stillJob(c,["a.png"]);
+  run(c,"job.tick();"); finishProcess(c); run(c,"while(job.tick()){}");
+  const name=run(c,"imported[0][0]");
+  run(c,`disk["/out/${name}"]="old"; imported=[];`);
+  stillJob(c,["a.png"]); run(c,"job=depthTest.createStillJob({name:'Comp'},layers,{inputSize:518,guideLayer:true,regenerate:true},function(){});");
+  run(c,"job.tick();");
+  assert.equal(run(c,`disk["/out/${name}"]`),"old");                 // untouched while generating
+  finishProcess(c); run(c,"while(job.tick()){}");
+  assert.equal(run(c,`disk["/out/${name}"]`),"png");
+  assert.equal(run(c,"Object.keys(disk).filter(function(k){return /_new_/.test(k);}).length"),0);
+});
+test("a different quality or an edited image gets its own depth map",()=>{
+  const c=helpers(); run(c,'depthTest.setOutputRoot(new Folder("/out"));');
+  const name=(size,mod)=>run(c,`var f=new File("/img/a.png"); f.modified=new Date(${mod}); depthTest.cachedDepthFile(f,${size}).name`);
+  assert.notEqual(name(518,1),name(1022,1));
+  assert.notEqual(name(518,1),name(518,2));
+  assert.equal(name(518,1),name(518,1));
+});
+test("Cancel never deletes a reused depth map",()=>{
+  const c=helpers(); stillJob(c,["a.png"]); run(c,"job.tick();"); finishProcess(c); run(c,"while(job.tick()){}");
+  stillJob(c,["a.png","b.png"]); run(c,"job.tick(); job.tick(); job.cancel(); while(job.tick()){}");   // a reused, b running
+  assert.equal(run(c,"job.result.status"),"cancelled");
+  assert.equal(run(c,"Object.keys(disk).filter(function(k){return /a_depth_518/.test(k);}).length"),1);
+  assert.equal(run(c,"Object.keys(disk).filter(function(k){return /b_depth/.test(k);}).length"),0);
+});
 test("Cancel stops Python, deletes this run's files and imports nothing",()=>{
   const c=helpers(); stillJob(c,["a.png","b.png"]);
   run(c,"job.tick();"); finishProcess(c); run(c,"job.tick(); job.tick();");  // first done, second running
@@ -159,6 +216,22 @@ test("Parallax: Displacement Map reads the depth layer and moves horizontally on
   assert.equal(run(c,"image.effects[0].matchName"),"ADBE Displacement Map");
   assert.deepEqual(JSON.parse(run(c,"JSON.stringify(image.effects[0].props[2].keys)")),[[0,-30],[3,30]]);
   assert.deepEqual(JSON.parse(run(c,"JSON.stringify([image.effects[0].props[0].values,image.effects[0].props[4].values,image.effects[0].props[5].values])")),[[2],[0],[2]]);
+  assert.equal(run(c,"depth.enabled"),false);
+});
+test("Depth Sweep: a white Add solid keeps only a depth band that travels from near to far, then fades",()=>{
+  const c=helpers();
+  run(c,`var BlendingMode={ADD:"add",NORMAL:"normal"}; app.project={rootFolder:{numItems:0,item:function(){}},items:{addFolder:function(n){return new FolderItem(n);}}};
+    var solid=fakeLayer(1); solid.source={}; solid.inPoint=0; solid.outPoint=10; var opacity=fakeProperty(); solid.moveToBeginning=function(){this.top=true;};
+    var base=solid.property; solid.property=function(n){return n==="ADBE Transform Group"?{property:function(){return opacity;}}:base(n);};
+    var comp={frameDuration:1/24,width:1920,height:1080,duration:10,layers:{addSolid:function(color,name,w,h){solid.args=[color,name,w,h];return solid;}}};
+    var depth=fakeLayer(2); depthTest.addSweepLayer(comp,depth,null,1920,1080,2);`);
+  assert.deepEqual(JSON.parse(run(c,"JSON.stringify(solid.args)")),[[1,1,1],"Depth Sweep",1920,1080]);
+  assert.deepEqual(JSON.parse(run(c,"JSON.stringify([solid.blendingMode,solid.top,solid.inPoint,solid.outPoint])")),["add",true,2,3.5]);
+  assert.deepEqual(JSON.parse(run(c,"JSON.stringify(solid.effects.map(function(e){return [e.matchName,e.name];}))")),[["ADBE Slider Control","Sweep Width"],["ADBE Gradient Wipe","Sweep Front"],["ADBE Gradient Wipe","Sweep Back"]]);
+  assert.deepEqual(JSON.parse(run(c,"JSON.stringify(solid.effects[1].props[0].keys)")),[[2,100],[3.5,0]]);
+  assert.match(run(c,"solid.effects[2].props[0].expression"),/100 - effect\("Sweep Front"\)\(1\) - effect\("Sweep Width"\)\(1\)/);
+  assert.deepEqual(JSON.parse(run(c,"JSON.stringify(solid.effects[2].props[4].values)")),[1]);   // Invert Gradient on the back wipe
+  assert.deepEqual(JSON.parse(run(c,"JSON.stringify(opacity.keys.map(function(k){return k[1];}))")),[100,0]);
   assert.equal(run(c,"depth.enabled"),false);
 });
 test("Parallax is refused for sequences before anything runs",()=>{

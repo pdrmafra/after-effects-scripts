@@ -14,9 +14,11 @@
     var STILL_EXTENSIONS = /\.(png|jpe?g|tiff?|bmp|webp)$/i;
     var MAX_SEQUENCE_FRAMES = 300;
     var PROJECT_FOLDER_NAME = "Depth Maps";
-    var EFFECT_LABELS = ["None", "Depth Reveal", "Parallax (stills only)"];
-    var EFFECT_KINDS = ["none", "reveal", "parallax"];
+    var EFFECT_LABELS = ["None", "Depth Reveal", "Depth Sweep", "Parallax (stills only)"];
+    var EFFECT_KINDS = ["none", "reveal", "sweep", "parallax"];
     var REVEAL_SECONDS = 1;
+    var SWEEP_SECONDS = 1.5;
+    var SWEEP_WIDTH = 12;         // band width, in percent of the depth range
     var PARALLAX_SECONDS = 3;
     var PARALLAX_AMOUNT = 0.015;  // displacement at each end of the move, as a fraction of the image width  // Project panel folder for everything this tool imports
     var TICK_MS = 150;            // how often a running job is checked; AE stays responsive in between
@@ -88,28 +90,55 @@
         return { mode: "still", layers: stills };
     }
 
-    // Saved project: "Depth Maps" next to the .aep, no dialog. Unsaved project: ask once per session.
+    // Files always go into a "Depth Maps" folder on disk: next to the saved .aep (no dialog), or, for an unsaved
+    // project, inside a folder chosen once per session (a chosen folder already named "Depth Maps" is used as is).
+    function depthMapsFolderIn(folder) {
+        return folder.name === PROJECT_FOLDER_NAME ? folder : new Folder(folder.fsName + "/" + PROJECT_FOLDER_NAME);
+    }
+
     function chooseOutputFolder() {
         var projectFile = app.project.file;
+        var picked;
 
         if (projectFile) {
-            OUTPUT_ROOT = new Folder(projectFile.parent.fsName + "/Depth Maps");
-            if (!OUTPUT_ROOT.exists && !OUTPUT_ROOT.create()) {
-                alert("Could not create the output folder:\n" + OUTPUT_ROOT.fsName);
-                OUTPUT_ROOT = null;
+            OUTPUT_ROOT = depthMapsFolderIn(projectFile.parent);
+        } else if (!OUTPUT_ROOT || !OUTPUT_ROOT.exists) {
+            picked = Folder.selectDialog("The project is not saved yet. Choose where to create the \"Depth Maps\" folder");
+            if (!picked) {
                 return false;
             }
-            return true;
+            OUTPUT_ROOT = depthMapsFolderIn(picked);
         }
 
-        if (!OUTPUT_ROOT || !OUTPUT_ROOT.exists) {
-            OUTPUT_ROOT = Folder.selectDialog("Save the project first, or choose a permanent folder for depth outputs");
+        if (!OUTPUT_ROOT.exists && !OUTPUT_ROOT.create()) {
+            alert("Could not create the output folder:\n" + OUTPUT_ROOT.fsName);
+            OUTPUT_ROOT = null;
+            return false;
         }
-        return !!OUTPUT_ROOT;
+        return true;
     }
 
     function uniqueStamp() {
         return String(new Date().getTime()) + "_" + String(Math.floor(Math.random() * 1000000));
+    }
+
+    // Short stable hash (djb2) used to name cached depth maps.
+    function stringHash(text) {
+        var hash = 5381;
+        var i;
+        for (i = 0; i < text.length; i += 1) {
+            hash = ((hash * 33) ^ text.charCodeAt(i)) >>> 0;
+        }
+        return ("0000000" + hash.toString(16)).slice(-8);
+    }
+
+    // The depth map for this image at this quality always gets the same name, so it can be found and reused.
+    // Editing or replacing the image (date or size changes), or another quality/model, gives a new name.
+    function cachedDepthFile(inputFile, inputSize) {
+        var modified = inputFile.modified ? inputFile.modified.getTime() : 0;
+        var key = [inputFile.fsName, modified, inputFile.length, inputSize, ENCODER].join("|");
+        var base = inputFile.displayName.replace(/\.[^\.]+$/, "");
+        return new File(OUTPUT_ROOT.fsName + "/" + base + "_depth_" + String(inputSize) + "_" + stringHash(key) + ".png");
     }
 
     function sanitizeName(value) {
@@ -358,6 +387,18 @@
         }
     }
 
+    // The project item already using this file, if the depth map was imported before.
+    function findFootage(file) {
+        var items = app.project.items;
+        var i;
+        for (i = 1; i <= items.length; i += 1) {
+            if (items[i] instanceof FootageItem && items[i].file && items[i].file.fsName === file.fsName) {
+                return items[i];
+            }
+        }
+        return null;
+    }
+
     // Imports the depth image. With a source layer, it duplicates that layer (same timing, 3D switch and place
     // in the stack), swaps in the depth image, removes effects so they do not alter the depth values,
     // and parents it to the image. If the image layer was deleted meanwhile, the depth goes on top of the comp.
@@ -371,9 +412,14 @@
             throw new Error("Depth map was not created: " + depthFile.fsName);
         }
 
-        footage = app.project.importFile(new ImportOptions(depthFile));
-        footage.name = depthFile.displayName;
-        footage.parentFolder = getProjectFolder();
+        footage = findFootage(depthFile);
+        if (footage) {
+            footage.mainSource.reload();  // picks up a regenerated file with the same name
+        } else {
+            footage = app.project.importFile(new ImportOptions(depthFile));
+            footage.name = depthFile.displayName;
+            footage.parentFolder = getProjectFolder();
+        }
 
         if (comp) {
             if (sourceLayer && isAlive(sourceLayer)) {
@@ -481,9 +527,66 @@
         useAsControlLayer(depthLayer);
     }
 
+    // Depth Sweep: a white band travels from near to far. Two Gradient Wipes on a solid keep only the depth band
+    // between "Sweep Front" and Front + "Sweep Width"; Add blending makes it read as light.
+    // With an image layer the solid matches the image and is parented to it; otherwise it covers the comp.
+    function addSweepLayer(comp, depthLayer, imageLayer, width, height, startTime) {
+        var duration = Math.round(SWEEP_SECONDS / comp.frameDuration) * comp.frameDuration;
+        var sweep = comp.layers.addSolid([1, 1, 1], "Depth Sweep", width, height, 1, comp.duration);
+        var front;
+        var back;
+        var bandWidth;
+        var opacity;
+        var effects;
+        var wipe;
+        var i;
+
+        sweep.source.parentFolder = getProjectFolder();
+        sweep.blendingMode = BlendingMode.ADD;
+        if (imageLayer) {
+            sweep.moveBefore(depthLayer);
+            sweep.threeDLayer = imageLayer.threeDLayer;
+            followSourceLayer(sweep, imageLayer, width, height);
+        } else {
+            sweep.moveToBeginning();
+        }
+        sweep.inPoint = startTime;
+        sweep.outPoint = startTime + duration;
+
+        // Adding an effect invalidates references to the layer's other effects, so add and name all three first,
+        // then look them up again by name.
+        addEffect(sweep, "ADBE Slider Control", "Slider Control").name = "Sweep Width";
+        addEffect(sweep, "ADBE Gradient Wipe", "Gradient Wipe").name = "Sweep Front";
+        addEffect(sweep, "ADBE Gradient Wipe", "Gradient Wipe").name = "Sweep Back";
+        effects = sweep.property("ADBE Effect Parade");
+        bandWidth = effects.property("Sweep Width");
+        front = effects.property("Sweep Front");
+        back = effects.property("Sweep Back");
+
+        bandWidth.property(1).setValue(SWEEP_WIDTH);
+        for (i = 0; i < 2; i += 1) {
+            wipe = i === 0 ? front : back;
+            wipe.property(2).setValue(percentValue(wipe.property(2), 10));
+            wipe.property(3).setValue(depthLayer.index);
+            wipe.property(4).setValue(3);
+        }
+        back.property(5).setValue(1); // Invert Gradient: removes everything nearer than the band
+        front.property(1).setValueAtTime(startTime, percentValue(front.property(1), 100));
+        front.property(1).setValueAtTime(startTime + duration, 0);
+        easeKeys(front.property(1));
+        back.property(1).expression = "clamp(100 - effect(\"Sweep Front\")(1) - effect(\"Sweep Width\")(1), 0, 100)";
+
+        opacity = sweep.property("ADBE Transform Group").property("ADBE Opacity");
+        opacity.setValueAtTime(startTime + duration - 6 * comp.frameDuration, 100);
+        opacity.setValueAtTime(startTime + duration, 0);
+        useAsControlLayer(depthLayer);
+        return sweep;
+    }
+
     // Sequences: the reveal goes on an adjustment layer above everything, spanning the work area.
     function addRevealAdjustmentLayer(comp, depthLayer, startTime, duration) {
         var adjustment = comp.layers.addSolid([1, 1, 1], "Depth Reveal", comp.width, comp.height, comp.pixelAspect, comp.duration);
+        adjustment.source.parentFolder = getProjectFolder();
         adjustment.adjustmentLayer = true;
         adjustment.moveToBeginning();
         adjustment.inPoint = startTime;
@@ -527,6 +630,8 @@
         }
         if (options.effect === "reveal") {
             applyDepthReveal(imageLayer, depthLayer, options.effectTime, comp.frameDuration);
+        } else if (options.effect === "sweep") {
+            addSweepLayer(comp, depthLayer, imageLayer, depthLayer.source.width, depthLayer.source.height, options.effectTime);
         } else if (options.effect === "parallax") {
             applyParallax(imageLayer, depthLayer, options.effectTime, comp.frameDuration, depthLayer.source.width);
         }
@@ -540,6 +645,7 @@
             return layers.length === 1 ? "Generating depth map..." : "Generating depth map " + String(i + 1) + " of " + String(layers.length) + "...";
         }
 
+        // Never deletes reused depth maps: only files made by this run.
         job.removeRunFiles = function () {
             var i;
             if (current) {
@@ -547,7 +653,9 @@
                 removeTree(current.log);
             }
             for (i = 0; i < job.outputs.length; i += 1) {
-                removeTree(job.outputs[i].output);
+                if (!job.outputs[i].reused) {
+                    removeTree(job.outputs[i].output);
+                }
             }
         };
 
@@ -560,6 +668,7 @@
         job.tick = function () {
             var i;
             var footage;
+            var reusedCount;
 
             try {
                 if (job.state === "finished") {
@@ -575,8 +684,16 @@
 
                 if (job.state === "launch") {
                     var inputFile = layers[job.index].source.file;
-                    var stem = OUTPUT_ROOT.fsName + "/" + inputFile.displayName.replace(/\.[^\.]+$/, "") + "_depth_" + uniqueStamp();
-                    current = { output: new File(stem + ".png"), log: new File(stem + ".log"), layer: layers[job.index] };
+                    var target = cachedDepthFile(inputFile, options.inputSize);
+                    if (target.exists && !options.regenerate) {
+                        job.outputs.push({ output: target, layer: layers[job.index], reused: true });
+                        job.index += 1;
+                        job.state = job.index < layers.length ? "launch" : "import";
+                        return true;
+                    }
+                    // A new map is written under a temporary name and only replaces the cached one when complete.
+                    var stem = target.fsName.replace(/\.png$/, "") + "_new_" + uniqueStamp();
+                    current = { output: new File(stem + ".png"), log: new File(stem + ".log"), target: target, layer: layers[job.index] };
                     job.pid = launchBackground(buildCommand(inputFile, current.output, options), current.log);
                     job.state = "wait";
                     job.fraction = job.index / layers.length;
@@ -598,6 +715,13 @@
                         return false;
                     }
                     removeTree(current.log);
+                    if (current.target.exists) {
+                        current.target.remove();
+                    }
+                    if (!current.output.rename(current.target.name)) {
+                        throw new Error("Could not rename the new depth map to " + current.target.fsName);
+                    }
+                    current.output = current.target;
                     job.outputs.push(current);
                     current = null;
                     job.index += 1;
@@ -616,7 +740,13 @@
                         app.endUndoGroup();
                     }
                     report("", 1);
-                    finishJob(job, "done", (job.outputs.length === 1 ? "Imported \"" + footage.name + "\"" : "Imported " + String(job.outputs.length) + " depth maps") + " into the Depth Maps folder.\n\nFiles saved in:\n" + OUTPUT_ROOT.fsName);
+                    reusedCount = 0;
+                    for (i = 0; i < job.outputs.length; i += 1) {
+                        reusedCount += job.outputs[i].reused ? 1 : 0;
+                    }
+                    finishJob(job, "done", (job.outputs.length === 1 ? "Imported \"" + footage.name + "\"" : "Imported " + String(job.outputs.length) + " depth maps") + " into the Depth Maps folder." +
+                        (reusedCount ? "\n\n" + (reusedCount === job.outputs.length ? (reusedCount === 1 ? "It already existed" : "They already existed") : String(reusedCount) + " already existed") + " for this image and quality, so it was reused. Option-click Generate to make a new one." : "") +
+                        "\n\nFiles saved in:\n" + OUTPUT_ROOT.fsName);
                     return false;
                 }
             } catch (err) {
@@ -765,6 +895,8 @@
                         var depthLayer = importDepthSequence(firstFrame, comp, options.guideLayer, startTime);
                         if (options.effect === "reveal") {
                             addRevealAdjustmentLayer(comp, depthLayer, startTime, frameCount * comp.frameDuration);
+                        } else if (options.effect === "sweep") {
+                            addSweepLayer(comp, depthLayer, null, comp.width, comp.height, startTime);
                         }
                     } finally {
                         app.endUndoGroup();
@@ -826,8 +958,8 @@
         win.spacing = 10;
         win.margins = 16;
 
-        var notice = win.add("statictext", undefined, "Select still image layers to get one depth map each. With nothing selected, the comp work area becomes a depth sequence.\nAfter Effects stays usable while it generates; the window closes and tells you when it is done.", { multiline: true });
-        notice.preferredSize = [360, 64];
+        var notice = win.add("statictext", undefined, "Select still image layers to get one depth map each. With nothing selected, the comp work area becomes a depth sequence. Existing depth maps are reused; Option-click Generate to make new ones.\nAfter Effects stays usable while it generates; the window closes and tells you when it is done.", { multiline: true });
+        notice.preferredSize = [360, 80];
 
         qualityGroup = win.add("group");
         qualityGroup.orientation = "row";
@@ -840,7 +972,7 @@
         effectGroup.add("statictext", undefined, "Effect");
         effectList = effectGroup.add("dropdownlist", undefined, EFFECT_LABELS);
         effectList.selection = 0;
-        effectList.helpTip = "Depth Reveal: the image appears near-first (Gradient Wipe). Parallax: a small 3D camera move (Displacement Map). Keys start at the current time.";
+        effectList.helpTip = "Depth Reveal: the image appears near-first (Gradient Wipe). Depth Sweep: a band of light travels from near to far. Parallax: a small 3D camera move (Displacement Map). Keys start at the current time.";
 
         guideLayerCheckbox = win.add("checkbox", undefined, "Import as guide layer");
         guideLayerCheckbox.value = true;
@@ -966,6 +1098,7 @@
             }
 
             options = {
+                regenerate: !!(ScriptUI.environment && ScriptUI.environment.keyboardState.altKey),
                 effect: effect,
                 effectTime: plan.mode === "still" ? comp.time : comp.workAreaStart,
                 inputSize: plan.mode === "still" ? QUALITY_INPUT_SIZES[qualityList.selection ? qualityList.selection.index : 0] : SEQUENCE_INPUT_SIZE,

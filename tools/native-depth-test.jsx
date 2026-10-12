@@ -58,6 +58,16 @@
             if(depth.parent!==image||d.property("ADBE Position").numKeys!==0||String(d.property("ADBE Position").value.slice(0,2))!==cx||String(d.property("ADBE Anchor Point").value.slice(0,2))!==cx||String(d.property("ADBE Scale").value.slice(0,2))!=="100,100"||d.property("ADBE Rotate Z").value!==0)throw new Error("Depth layer is not parented to the image with a neutral transform.");
             if(depth.property("ADBE Effect Parade").numProperties!==0||!depth.guideLayer)throw new Error("Depth layer kept effects or is not a guide layer.");
         });
+        test("AE second run on the same image reuses its depth map and project item",function(){
+            var image=comp.layers.add(app.project.importFile(new ImportOptions(firstSourceFrame))); owned.push(image.source);
+            var first=drive(depthTest.stillJob(comp,[image],options,noReport),300000);
+            if(first.status!=="done")throw new Error(first.message);
+            var footage=comp.layer(1).source, items=app.project.numItems, started=new Date().getTime();
+            var second=drive(depthTest.stillJob(comp,[image],options,noReport),300000);
+            if(second.status!=="done"||second.message.indexOf("already existed")<0)throw new Error("Not reused: "+second.message);
+            if(comp.layer(1).source!==footage||app.project.numItems!==items)throw new Error("Reuse imported a duplicate item.");
+            if(new Date().getTime()-started>5000)throw new Error("Reuse was not instant.");
+        });
         test("AE Depth Reveal and Parallax drive the image from its hidden depth layer",function(){
             var checks=[["reveal","Depth Reveal","Gradient Layer",1,"Transition Completion"],["parallax","Depth Parallax","Displacement Map Layer",3,"Max Horizontal Displacement"]];
             for(var k=0;k<checks.length;k++){
@@ -70,6 +80,15 @@
                 if(fx.property(checks[k][3]).name!==checks[k][4]||fx.property(checks[k][3]).numKeys!==2)throw new Error(checks[k][0]+": wrong animated property.");
                 if(depth.enabled||depth.parent!==image)throw new Error(checks[k][0]+": depth layer should be hidden and parented.");
             }
+        });
+        test("AE Depth Sweep adds a parented Add solid whose expression evaluates",function(){
+            var image=comp.layers.add(app.project.importFile(new ImportOptions(firstSourceFrame))); owned.push(image.source);
+            var result=drive(depthTest.stillJob(comp,[image],withEffect("sweep"),noReport),300000);
+            if(result.status!=="done")throw new Error(result.message);
+            var sweep=comp.layer(1), depth=comp.layer(2); owned.push(depth.source); owned.push(sweep.source);
+            var back=sweep.property("ADBE Effect Parade").property("Sweep Back"), front=sweep.property("ADBE Effect Parade").property("Sweep Front");
+            if(sweep.name!=="Depth Sweep"||sweep.parent!==image||depth.parent!==image||depth.enabled||!back||!front)throw new Error("Wrong sweep setup.");
+            if(back.property(1).expressionError!==""||back.property(5).value!==1||front.property(3).value!==depth.index||front.property(1).numKeys!==2)throw new Error("Sweep wipes are not wired correctly: "+back.property(1).expressionError);
         });
         test("AE sequence Depth Reveal goes on an adjustment layer above everything",function(){
             var before=comp.numLayers, result=drive(depthTest.sequenceJob(comp,withEffect("reveal"),noReport),600000);
@@ -90,7 +109,7 @@
         });
     }finally{
         if(comp)comp.remove();
-        for(var i=owned.length-1;i>=0;i--)if(owned[i].usedIn.length===0)owned[i].remove();
+        for(var i=owned.length-1;i>=0;i--)try{if(owned[i].usedIn.length===0)owned[i].remove();}catch(error){}  // reused items appear more than once
         if(!hadDepthFolder){var made=depthFolders();for(i=0;i<made.length;i++)if(made[i].numItems===0)made[i].remove();}
         for(i=0;i<oldSelection.length;i++)try{oldSelection[i].selected=true;}catch(error){}
         if(oldActive instanceof CompItem)oldActive.openInViewer();

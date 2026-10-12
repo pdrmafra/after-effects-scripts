@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Depth Map: files always go into a "Depth Maps" folder on disk; for an unsaved project it is created inside the folder you choose instead of filling that folder.
+- Depth Map: stills reuse an existing depth map for the same image and quality instead of generating again (Option-click Generate to regenerate); the Project panel item is reused too.
+- Depth Map: `install.command` sets everything up with a double-click (Python environment, pinned model code, verified Small checkpoints, environment check); verified from an empty folder.
+- Depth Map: new Depth Sweep effect — a band of light travels from near to far (two depth-driven Gradient Wipes on an Add solid, with a Sweep Width slider).
 - Depth Map: one Generate button that follows the selection. Selected still images get one depth map each, placed above their layer with the same timing and parented to it, so they match its position, scale and animation; with nothing selected (or a video/precomp layer) the work area becomes a Video Depth Anything sequence. Fixes the window keeping the selection from when it was opened.
 - Depth Map: removed Choose Image, Encoder, Clip, Gamma, Blur, Invert, Frame batch and Temporal smoothing from the panel (do contrast, blur and invert in AE, where they stay editable; the CLIs keep their flags). New Still quality option (Normal/High); sequences stay at Normal because higher sizes ran out of GPU memory on Apple Silicon.
 - Depth Map: outputs go to a "Depth Maps" folder next to the saved project, without a dialog, and are imported into a "Depth Maps" folder in the Project panel. The window closes when a run finishes, with a message saying what was imported and how long it took; failures show the reason.

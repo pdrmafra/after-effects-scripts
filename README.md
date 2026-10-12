@@ -8,7 +8,7 @@ Free tools from my motion-design workflow. By [Pedro Mafra](https://pedromafra.c
 | **Keyframe Tools** *(new)* | One compact dockable panel: space, step and thin out keys, move keys to a layer's in or out point, and trim layers to their keys. | [Guide](docs/keyframe-tools.md) |
 | **Font Inspector** | Lists every font used in a comp and its precomps, and jumps to each layer that uses it. | [Guide](docs/font-inspector.md) |
 | **Shape to Stroke** *(experimental)* | Turns filled outline shapes into editable strokes you can animate with Trim Paths. | [Guide](experimental/shape-to-stroke/README.md) |
-| **Depth Map** *(advanced, macOS)* | Generates depth-map images from stills or short comp sequences with local AI models. Needs a Python setup. | [Setup](depth-map/README.md) |
+| **Depth Map** *(advanced, macOS)* | Generates depth-map images from stills or short comp sequences with local AI models, with optional Depth Reveal, Depth Sweep and Parallax effects. Needs Python 3.12 and a one-click install. | [Setup](depth-map/README.md) |
 
 ## See them in action
 
@@ -38,7 +38,7 @@ They also work as KBar buttons. Font Inspector's **Save Report** and Depth Map n
 
 Keyframe Tools is a panel: copy `Keyframe-Tools.jsx` into the **ScriptUI Panels** folder inside that Scripts folder, restart AE and open it from the **Window** menu. See its [guide](docs/keyframe-tools.md).
 
-Depth Map is different: keep its whole `depth-map` folder and follow its [setup guide](depth-map/README.md) first.
+Depth Map is different: keep its whole `depth-map` folder and double-click its `install.command` once (see the [setup guide](depth-map/README.md)).
 
 ## Before you use them
 

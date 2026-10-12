@@ -51,7 +51,7 @@ AE **26.5x89**, macOS **27.0.1**. Fixtures created temporary comps and cleaned t
 ## Still unverified
 
 - Windows, older AE versions, GPU/HD production performance and long video clips.
-- Full fresh-environment installation: model tests used the existing Python environment, with installed versions recorded rather than reinstalling it.
+- Fresh installation was verified on 2026-10-12 with `depth-map/install.command` in an empty copy of the folder (macOS 27, Apple Silicon, Homebrew Python 3.12): checksums, environment check, Python unit tests and both model smoke paths on MPS passed. Not yet tried with the python.org installer or on Intel Macs.
 - End-user interaction with every ScriptUI button, report-save flow, KBar launch and manual Undo/Redo in a representative project.
 - Every effect/render-order interaction and external expression dependency after hierarchy transfer.
 - Stepped motion-path subdivision beyond the author's manual check: eased timing, intermediate keys and 3D Position were covered by Node tests only; the native check `step keeps a hand-curved Position path` in `tools/native-test.jsx` has not been run yet.

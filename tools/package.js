@@ -37,7 +37,8 @@ BEFORE YOU USE THEM
 WHAT'S INSIDE
 Scripts/                     Transform to Null, Keyframe Tools, Font Inspector, Shape to Stroke
 Shape to Stroke test comps/  Run Create-Test-Fixtures.jsx to add READY, SKIP and ICONS test comps. Keep these files together.
-depth-map/                   Keep the whole folder; follow depth-map/README.md before running jsx/DepthMapStatic.jsx.
+depth-map/                   Keep the whole folder. Double-click install.command once (first time: right-click > Open),
+                             then run jsx/DepthMapStatic.jsx. Details: depth-map/README.md.
 
 GUIDES
 Transform to Null   ${repo}docs/transform-to-null.md
