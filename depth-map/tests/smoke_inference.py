@@ -28,7 +28,6 @@ def main():
             cv2.circle(image, (55, 45), 12, (255, 255, 255), -1)
             assert cv2.imwrite(str(source / f"frame_{index+1:06}.png"), image)
         jobs = [("generate_depth.py", "Depth-Anything-V2", root / "static.png"),
-                ("generate_depth_sequence.py", "Depth-Anything-V2", root / "batch"),
                 ("generate_vda_sequence.py", "Video-Depth-Anything", root / "vda")]
         for script, repo, output in jobs:
             command = [sys.executable, str(backend / script), "--repo", str(args.vendor / repo), "--input-size", "112", "--device", args.device]

@@ -1,8 +1,8 @@
 # Depth Map — experimental
 
-Local After Effects launcher plus Python backends for **16-bit grayscale PNG depth maps**. Stills use Depth Anything V2; sequences can use frame-by-frame DAV2 or Video Depth Anything. These are relative-depth outputs, not calibrated distances.
+Local After Effects launcher plus Python backends for **16-bit grayscale PNG depth maps**. Stills use Depth Anything V2; sequences use Video Depth Anything. These are relative-depth outputs, not calibrated distances.
 
-**macOS launcher, advanced setup.** This is not a one-click plugin. Small-model CPU inference and a small AE 26.5 export/import pipeline have been tested; see [Validation](../docs/validation.md). Long sequences, Windows, CUDA and higher-resolution performance are not covered by those tests. The AE panel blocks while generating and has no reliable mid-inference cancel button.
+**macOS launcher, advanced setup.** This is not a one-click plugin. Small-model CPU inference and a small AE 26.5 export/import pipeline have been tested; see [Validation](../docs/validation.md). Long sequences, Windows, CUDA and higher-resolution performance are not covered by those tests. Generation runs in the background: After Effects stays usable, the panel shows progress, and Cancel stops it.
 
 No Python environment, upstream source trees or model weights are distributed here. Inference stays local; setup requires internet downloads.
 
@@ -43,19 +43,25 @@ The official Small-model cards report Apache-2.0 licenses. Other model sizes hav
 
 Keep the entire `depth-map` directory together. Use **File → Scripts → Run Script File… → `jsx/DepthMapStatic.jsx`**. Enable AE's **Allow Scripts to Write Files and Access Network** preference for local exports and Python orchestration; the launcher itself does not upload images or download models.
 
-- **Static:** select one image-footage layer or choose a PNG/JPEG/TIFF manually. The raw image source is processed, not the selected layer's effects/transforms. Video footage is not a static image input.
-- **Sequence:** open a comp and set its work area. The comp is rendered with its current effects/layers. Choose Video Depth Anything or Frame batch. The panel limits work areas to 300 frames.
-- Choose a **permanent output folder** when asked. Keep outputs with your project so imported footage stays online.
-- Outputs can be imported as guide layers. Sequence imports use the composition frame rate and start at the work-area start.
+- Open a comp and press **Generate**. What it does depends on the selection:
+  - **Still image layers selected:** one depth map per layer, placed right above it with the same timing and parented to it, so it sits exactly on the image and follows its position, scale, rotation and animation. The image layer's effects are not copied. The raw image file is processed, not the layer's effects/transforms. PNG, JPEG and TIFF are supported.
+  - **Nothing selected, or a video/precomp layer:** the comp work area is rendered with its current effects/layers and turned into a depth sequence with Video Depth Anything, starting at the work-area start. Up to 300 frames.
+- **Still quality:** Normal is the model's native size; High processes at about twice the size for finer detail (railings, hair, nets) and is still well under a second per image on an M4 Max. Sequences always use Normal: Video Depth Anything ran out of GPU memory above that size on Apple Silicon.
+- Outputs go to a **Depth Maps** folder next to the saved project. For an unsaved project the panel asks for a permanent folder once per session. Keep outputs with your project so imported footage stays online.
+- **Effect** (optional), built from standard AE effects so it stays editable:
+  - **Depth Reveal:** a Gradient Wipe driven by the depth makes the image appear near-first over 1 second, starting at the current time (stills) or at the work-area start (sequences, on an adjustment layer above everything). Tick the effect's Invert Gradient to make the background lead; move or retime its keys freely.
+  - **Parallax (stills only):** a Displacement Map driven by the depth moves near and far parts in opposite directions over 3 seconds, like a small camera orbit. Change Max Horizontal Displacement for a stronger move.
+  - With an effect, the depth layer becomes a hidden control layer (eye off, not a guide layer).
+- Imported files go into a **Depth Maps** folder in the Project panel (created once, then reused). Layers are guide layers unless you untick that option.
+- When a run finishes, the window closes and a message says what was imported and how long it took. If it fails, a message shows why (the end of the model's log) and the window stays open; after a Cancel it stays open without a message.
+- While it runs, **Generate** becomes **Cancel**. Cancel stops Python, imports nothing and deletes the files of that run (exported frames and partial depth). Closing the window or the project also cancels. The model works on blocks of about 32 frames, so sequence progress moves block by block.
 
-The launcher requires the matching checkpoint for the chosen action: static generation does not require a VDA checkpoint; a VDA sequence does not require a DAV2 checkpoint.
+The launcher requires the matching checkpoint for the chosen action: stills need the DAV2 checkpoint; sequences need the VDA checkpoint.
 
 ## Controls and limits
 
-- Clip low/high: percentile normalization. Gamma above 1 brightens midtones. Blur smooths gradients. Invert swaps near/far.
-- Temporal smoothing applies only to frame-batch DAV2; it is a one-way exponential filter and can lag fast motion. Per-frame normalization can still flicker.
+- The panel writes the full depth range with no adjustment. Shape it in AE, where it stays editable: Levels or Curves for contrast and midtones, Gaussian Blur to soften, Invert to swap near/far. The CLIs still accept `--clip-low`, `--clip-high`, `--gamma`, `--blur` and `--invert`.
 - VDA uses one global normalization range across the clip, and this wrapper loads all RGB frames into RAM. Start with a short, low-resolution work area.
-- Input-size values are bounded to 64–4096. Larger sizes increase runtime/memory; they are not automatically better for every input.
 - RGB image inputs are used; transparency is not a depth mask. EXR input/color-management fidelity is not supported by this release.
 - Generated PNGs and exported source frames stay on disk. AE Undo removes project edits, not filesystem output. Remove source exports manually only after verifying the result; keep imported depth files.
 - Output sequences require an empty destination and a completion marker. Incomplete runs leave their partial output for diagnosis but are not imported by the panel.
@@ -77,4 +83,4 @@ All CLIs accept `--help`. Sequence filenames are naturally sorted; frame count m
 
 ## Future work
 
-Evaluate newer model adapters with real motion-design footage, quality/runtime comparisons and separate license checks. Add cancellation/progress in a non-blocking panel. Neither is claimed as supported in this beta.
+A first comparison of newer models (Depth Anything 3, MoGe-2, Distill Any Depth) on sample images found no clear replacement for the current Small models; MoGe-2 Large is the candidate for cleaner edges on stills, pending tests on real motion-design footage.

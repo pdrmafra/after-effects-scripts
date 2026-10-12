@@ -47,7 +47,7 @@ Depth Map is different: keep its whole `depth-map` folder and follow its [setup 
 - Tested on After Effects 26.5 on macOS. Windows and older versions have not been tested yet.
 - The keyframe tools refuse roving keys, auto-Bezier/continuous keys and properties with expressions rather than change them silently.
 - Font Inspector reports can contain your project's text and layer names. Check a report before sharing it.
-- Depth Map runs entirely on your computer. After Effects stays busy while it generates, with no cancel button, and its image files are not removed by Undo.
+- Depth Map runs entirely on your computer. It generates in the background with a progress bar and a Cancel button; its image files are not removed by Undo.
 
 Found a problem or have an idea? [Open an issue](https://github.com/pdrmafra/after-effects-scripts/issues).
 

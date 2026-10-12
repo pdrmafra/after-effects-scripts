@@ -3,14 +3,26 @@
     var SCRIPT_DIR = SCRIPT_FILE.parent;
     var PROJECT_DIR = SCRIPT_DIR.parent;
     var BACKEND_SCRIPT = new File(PROJECT_DIR.fsName + "/backend/generate_depth.py");
-    var SEQUENCE_BACKEND_SCRIPT = new File(PROJECT_DIR.fsName + "/backend/generate_depth_sequence.py");
     var VDA_SEQUENCE_BACKEND_SCRIPT = new File(PROJECT_DIR.fsName + "/backend/generate_vda_sequence.py");
     var VENV_PYTHON = new File(PROJECT_DIR.fsName + "/backend/.venv/bin/python");
     var OUTPUT_ROOT = null;
-    var DEFAULT_ENCODER = "vits";
-    var DEFAULT_INPUT_SIZE = 518;
-    var ENCODER_LABELS = ["vits - Small", "vitb - Base (non-commercial weights)", "vitl - Large (non-commercial weights)"];
-    var SEQUENCE_BACKEND_LABELS = ["Video Depth Anything", "Frame batch"];
+    var ENCODER = "vits";
+    var QUALITY_LABELS = ["Normal", "High (slower)"];
+    var QUALITY_INPUT_SIZES = [518, 1022];
+    // Video Depth Anything on Apple GPUs failed above ~644 px (one buffer of 64 GB at 1022), so sequences stay at Normal.
+    var SEQUENCE_INPUT_SIZE = 518;
+    var STILL_EXTENSIONS = /\.(png|jpe?g|tiff?|bmp|webp)$/i;
+    var MAX_SEQUENCE_FRAMES = 300;
+    var PROJECT_FOLDER_NAME = "Depth Maps";
+    var EFFECT_LABELS = ["None", "Depth Reveal", "Parallax (stills only)"];
+    var EFFECT_KINDS = ["none", "reveal", "parallax"];
+    var REVEAL_SECONDS = 1;
+    var PARALLAX_SECONDS = 3;
+    var PARALLAX_AMOUNT = 0.015;  // displacement at each end of the move, as a fraction of the image width  // Project panel folder for everything this tool imports
+    var TICK_MS = 150;            // how often a running job is checked; AE stays responsive in between
+    var EXPORT_SLICE_MS = 250;    // frame export work done per check
+    var FRAME_TIMEOUT_MS = 10000;
+    var STOP_TIMEOUT_MS = 5000;   // after Cancel, force-stop Python if it has not exited by then
 
     function shellQuote(value) {
         return "'" + String(value).replace(/'/g, "'\\''") + "'";
@@ -24,40 +36,80 @@
         return comp;
     }
 
-    function getSelectedFootageFile() {
-        var comp = getActiveComp();
-        var layer;
-        var source;
-
-        if (!comp || comp.selectedLayers.length !== 1) {
-            return null;
+    // False once the item/layer was deleted or its project closed.
+    function isAlive(object) {
+        try {
+            return !!object && object.name !== undefined;
+        } catch (err) {
+            return false;
         }
-
-        layer = comp.selectedLayers[0];
-        source = layer.source;
-
-        if (source && source instanceof FootageItem && source.file && source.file.exists) {
-            return source.file;
-        }
-
-        return null;
     }
 
+    function isStillFootageLayer(layer) {
+        var source = layer && layer.source;
+        return !!(source && source instanceof FootageItem && source.mainSource instanceof FileSource && source.mainSource.isStill);
+    }
+
+    // What one click does with the current selection:
+    // every selected layer is a still image -> one depth image per layer;
+    // nothing selected or anything else -> a depth sequence of the comp work area.
+    function planFromSelection(comp) {
+        var layers = comp.selectedLayers;
+        var stills = [];
+        var i;
+
+        if (layers.length === 0) {
+            return { mode: "sequence" };
+        }
+
+        for (i = 0; i < layers.length; i += 1) {
+            if (isStillFootageLayer(layers[i])) {
+                stills.push(layers[i]);
+            }
+        }
+
+        if (stills.length === 0) {
+            return { mode: "sequence" };
+        }
+
+        if (stills.length !== layers.length) {
+            return { error: "Select only still images (one depth map each), or deselect everything to generate the work area as a sequence." };
+        }
+
+        for (i = 0; i < stills.length; i += 1) {
+            if (!stills[i].source.file || !stills[i].source.file.exists) {
+                return { error: "The image file for layer \"" + stills[i].name + "\" is missing. Relink the footage first." };
+            }
+            if (!STILL_EXTENSIONS.test(stills[i].source.file.name)) {
+                return { error: "Layer \"" + stills[i].name + "\" uses a file type the model cannot read. Use PNG, JPEG or TIFF." };
+            }
+        }
+
+        return { mode: "still", layers: stills };
+    }
+
+    // Saved project: "Depth Maps" next to the .aep, no dialog. Unsaved project: ask once per session.
     function chooseOutputFolder() {
-        if (!OUTPUT_ROOT || !OUTPUT_ROOT.exists) OUTPUT_ROOT = Folder.selectDialog("Choose a permanent folder for depth outputs (keep it with your project)");
+        var projectFile = app.project.file;
+
+        if (projectFile) {
+            OUTPUT_ROOT = new Folder(projectFile.parent.fsName + "/Depth Maps");
+            if (!OUTPUT_ROOT.exists && !OUTPUT_ROOT.create()) {
+                alert("Could not create the output folder:\n" + OUTPUT_ROOT.fsName);
+                OUTPUT_ROOT = null;
+                return false;
+            }
+            return true;
+        }
+
+        if (!OUTPUT_ROOT || !OUTPUT_ROOT.exists) {
+            OUTPUT_ROOT = Folder.selectDialog("Save the project first, or choose a permanent folder for depth outputs");
+        }
         return !!OUTPUT_ROOT;
     }
 
-    function makeOutputFile(inputFile) {
-        var outputFolder = OUTPUT_ROOT;
-        var baseName = inputFile.displayName.replace(/\.[^\.]+$/, "");
-        var stamp = String(new Date().getTime());
-
-        if (!outputFolder.exists) {
-            outputFolder.create();
-        }
-
-        return new File(outputFolder.fsName + "/" + baseName + "_depth_" + stamp + ".png");
+    function uniqueStamp() {
+        return String(new Date().getTime()) + "_" + String(Math.floor(Math.random() * 1000000));
     }
 
     function sanitizeName(value) {
@@ -73,10 +125,9 @@
     }
 
     function makeSequenceFolders(comp) {
-        var root = new Folder(OUTPUT_ROOT.fsName + "/" + sanitizeName(comp.name) + "_" + String(new Date().getTime()) + "_" + Math.floor(Math.random()*1000000));
+        var root = new Folder(OUTPUT_ROOT.fsName + "/" + sanitizeName(comp.name) + "_" + uniqueStamp());
         var sourceFolder = new Folder(root.fsName + "/source");
         var depthFolder = new Folder(root.fsName + "/depth");
-        var logFile = new File(root.fsName + "/sequence_log.txt");
 
         if (!root.create() || !sourceFolder.create() || !depthFolder.create()) {
             throw new Error("Could not create sequence output folders.");
@@ -86,7 +137,7 @@
             root: root,
             source: sourceFolder,
             depth: depthFolder,
-            log: logFile
+            log: new File(root.fsName + "/sequence_log.txt")
         };
     }
 
@@ -106,37 +157,244 @@
         }
     }
 
-    function waitForFile(file, timeoutMs) {
-        var started = new Date().getTime();
-
-        while (!file.exists && (new Date().getTime() - started) < timeoutMs) {
-            $.sleep(100);
+    function readText(file) {
+        var text = "";
+        if (!file || !file.exists) {
+            return "";
         }
-
-        return file.exists;
+        try {
+            file.open("r");
+            text = file.read();
+        } catch (err) {
+            text = "";
+        }
+        try {
+            file.close();
+        } catch (closeErr) {}
+        return text;
     }
 
-    function importDepthMap(depthFile, importAsGuideLayer) {
-        var comp = getActiveComp();
-        var importOptions;
+    function lastLines(text, count) {
+        var lines = String(text).replace(/\r/g, "\n").split("\n");
+        var kept = [];
+        var i;
+        for (i = lines.length - 1; i >= 0 && kept.length < count; i -= 1) {
+            if (lines[i].replace(/\s+/g, "") !== "") {
+                kept.unshift(lines[i]);
+            }
+        }
+        return kept.join("\n");
+    }
+
+    // Deletes a file or a folder this tool created for one run (never anything else).
+    function removeTree(item) {
+        var children;
+        var i;
+
+        if (!item || !item.exists) {
+            return;
+        }
+        if (item instanceof Folder) {
+            children = item.getFiles();
+            for (i = 0; i < children.length; i += 1) {
+                removeTree(children[i]);
+            }
+        }
+        item.remove();
+    }
+
+    // ---- Background Python process -------------------------------------------------------------
+
+    // Starts the command detached from After Effects and returns its process id.
+    function buildLaunchCommand(command, logFile) {
+        return "nohup " + command + " > " + shellQuote(logFile.fsName) + " 2>&1 < /dev/null & echo $!";
+    }
+
+    function launchBackground(command, logFile) {
+        var output = system.callSystem(buildLaunchCommand(command, logFile));
+        var pid = parseInt(String(output).replace(/\s+/g, ""), 10);
+        if (!(pid > 0)) {
+            throw new Error("Could not start Python.\n\nCommand:\n" + command + "\n\nOutput:\n" + output);
+        }
+        return pid;
+    }
+
+    function isProcessRunning(pid) {
+        return String(system.callSystem("kill -0 " + String(pid) + " 2>/dev/null && echo running")).indexOf("running") >= 0;
+    }
+
+    function stopProcess(pid, force) {
+        system.callSystem("kill " + (force ? "-9 " : "") + String(pid) + " 2>/dev/null");
+    }
+
+    // Reads Video Depth Anything's log: model blocks ("2/5 [") then written frames ("40/96 /path").
+    function parseSequenceProgress(logText) {
+        var text = String(logText).replace(/\r/g, "\n");
+        var writing = text.match(/^(\d+)\/(\d+) \//gm);
+        var blocks = text.match(/(\d+)\/(\d+) \[/g);
+        var parts;
+
+        if (writing) {
+            parts = writing[writing.length - 1].match(/(\d+)\/(\d+)/);
+            return { phase: "writing", done: Number(parts[1]), total: Number(parts[2]) };
+        }
+        if (blocks) {
+            parts = blocks[blocks.length - 1].match(/(\d+)\/(\d+)/);
+            return { phase: "model", done: Number(parts[1]), total: Number(parts[2]) };
+        }
+        return { phase: "starting", done: 0, total: 0 };
+    }
+
+    // ---- Commands ------------------------------------------------------------------------------
+
+    function buildCommand(inputFile, outputFile, options) {
+        var args = [];
+
+        args.push(shellQuote(BACKEND_SCRIPT.fsName));
+        args.push("--input " + shellQuote(inputFile.fsName));
+        args.push("--output " + shellQuote(outputFile.fsName));
+        args.push("--encoder " + shellQuote(ENCODER));
+        args.push("--input-size " + String(options.inputSize));
+        args.push("--device auto");
+
+        return shellQuote(VENV_PYTHON.fsName) + " " + args.join(" ");
+    }
+
+    function buildSequenceCommand(inputFolder, outputFolder, options, fps) {
+        var args = [];
+
+        args.push(shellQuote(VDA_SEQUENCE_BACKEND_SCRIPT.fsName));
+        args.push("--input-dir " + shellQuote(inputFolder.fsName));
+        args.push("--output-dir " + shellQuote(outputFolder.fsName));
+        args.push("--pattern " + shellQuote("frame_*.png"));
+        args.push("--prefix " + shellQuote("vda_depth_"));
+        args.push("--encoder " + shellQuote(ENCODER));
+        args.push("--input-size " + String(options.inputSize));
+        args.push("--device auto");
+        args.push("--fps " + String(fps));
+
+        return shellQuote(VENV_PYTHON.fsName) + " " + args.join(" ");
+    }
+
+    function getCheckpointFile() {
+        return new File(PROJECT_DIR.fsName + "/backend/vendor/Depth-Anything-V2/checkpoints/depth_anything_v2_" + ENCODER + ".pth");
+    }
+
+    function getVdaCheckpointFile() {
+        return new File(PROJECT_DIR.fsName + "/backend/vendor/Video-Depth-Anything/checkpoints/video_depth_anything_" + ENCODER + ".pth");
+    }
+
+    // Returns an error message, or "" when the backend and the needed checkpoint are installed.
+    function checkSetup(mode) {
+        var checkpointFile = mode === "still" ? getCheckpointFile() : getVdaCheckpointFile();
+        var backendFile = mode === "still" ? BACKEND_SCRIPT : VDA_SEQUENCE_BACKEND_SCRIPT;
+
+        if ($.os.indexOf("Mac") < 0) {
+            return "The AE launcher currently supports macOS only. See README for CLI usage.";
+        }
+        if (!VENV_PYTHON.exists) {
+            return "Python environment not installed. Follow depth-map/README.md before using this panel.";
+        }
+        if (!backendFile.exists) {
+            return "Backend script not found: " + backendFile.fsName;
+        }
+        if (!checkpointFile.exists) {
+            return "Model not installed. No weights are bundled; download it separately (see README).\n\nExpected file:\n" + checkpointFile.fsName;
+        }
+        return "";
+    }
+
+    // ---- Import --------------------------------------------------------------------------------
+
+    // The "Depth Maps" folder at the top of the Project panel; created on first use, reused afterwards.
+    function getProjectFolder() {
+        var root = app.project.rootFolder;
+        var i;
+
+        for (i = 1; i <= root.numItems; i += 1) {
+            if (root.item(i) instanceof FolderItem && root.item(i).name === PROJECT_FOLDER_NAME) {
+                return root.item(i);
+            }
+        }
+        return app.project.items.addFolder(PROJECT_FOLDER_NAME);
+    }
+
+    function clearProperty(property) {
+        if (!property) {
+            return;
+        }
+        if (property.canSetExpression && property.expression !== "") {
+            property.expression = "";
+        }
+        while (property.numKeys > 0) {
+            property.removeKey(property.numKeys);
+        }
+    }
+
+    // Parents the depth layer to its image with a neutral transform, so it sits exactly on the image
+    // (same pixel size) and follows every later change to it.
+    function followSourceLayer(layer, sourceLayer, width, height) {
+        var transform = layer.property("ADBE Transform Group");
+        var position = transform.property("ADBE Position");
+        var names = ["ADBE Anchor Point", "ADBE Position", "ADBE Position_0", "ADBE Position_1", "ADBE Position_2", "ADBE Scale", "ADBE Orientation", "ADBE Rotate X", "ADBE Rotate Y", "ADBE Rotate Z"];
+        var i;
+
+        for (i = 0; i < names.length; i += 1) {
+            clearProperty(transform.property(names[i]));
+        }
+        if (position.dimensionsSeparated) {
+            position.dimensionsSeparated = false;
+        }
+
+        layer.parent = sourceLayer;
+        transform.property("ADBE Anchor Point").setValue([width / 2, height / 2, 0]);
+        position.setValue([width / 2, height / 2, 0]);
+        transform.property("ADBE Scale").setValue([100, 100, 100]);
+        transform.property("ADBE Rotate Z").setValue(0);
+        if (layer.threeDLayer) {
+            transform.property("ADBE Orientation").setValue([0, 0, 0]);
+            transform.property("ADBE Rotate X").setValue(0);
+            transform.property("ADBE Rotate Y").setValue(0);
+        }
+    }
+
+    // Imports the depth image. With a source layer, it duplicates that layer (same timing, 3D switch and place
+    // in the stack), swaps in the depth image, removes effects so they do not alter the depth values,
+    // and parents it to the image. If the image layer was deleted meanwhile, the depth goes on top of the comp.
+    function importDepthMap(depthFile, comp, sourceLayer, importAsGuideLayer) {
         var footage;
         var layer;
+        var effects;
+        var i;
 
         if (!depthFile.exists) {
             throw new Error("Depth map was not created: " + depthFile.fsName);
         }
 
-        importOptions = new ImportOptions(depthFile);
-        footage = app.project.importFile(importOptions);
+        footage = app.project.importFile(new ImportOptions(depthFile));
         footage.name = depthFile.displayName;
+        footage.parentFolder = getProjectFolder();
 
         if (comp) {
-            layer = comp.layers.add(footage);
+            if (sourceLayer && isAlive(sourceLayer)) {
+                layer = sourceLayer.duplicate();
+                layer.locked = false;
+                layer.replaceSource(footage, false);
+                effects = layer.property("ADBE Effect Parade");
+                for (i = effects.numProperties; i >= 1; i -= 1) {
+                    effects.property(i).remove();
+                }
+                layer.blendingMode = BlendingMode.NORMAL;
+                layer.enabled = true;
+                followSourceLayer(layer, sourceLayer, footage.width, footage.height);
+            } else {
+                layer = comp.layers.add(footage);
+            }
             layer.name = footage.name;
             layer.guideLayer = !!importAsGuideLayer;
         }
 
-        return footage;
+        return layer;
     }
 
     function importDepthSequence(firstFrameFile, comp, importAsGuideLayer, startTime) {
@@ -153,6 +411,7 @@
         importOptions.forceAlphabetical = true;
         footage = app.project.importFile(importOptions);
         footage.name = comp.name + "_depth_sequence";
+        footage.parentFolder = getProjectFolder();
 
         footage.mainSource.conformFrameRate = 1 / comp.frameDuration;
 
@@ -161,432 +420,577 @@
         layer.startTime = startTime;
         layer.guideLayer = !!importAsGuideLayer;
 
-        return footage;
+        return layer;
     }
 
-    function buildCommand(inputFile, outputFile, options) {
-        var args = [];
-        var pythonCommand = shellQuote(VENV_PYTHON.fsName);
+    // ---- Effects driven by the depth layer -----------------------------------------------------
 
-        args.push(shellQuote(BACKEND_SCRIPT.fsName));
-        args.push("--input " + shellQuote(inputFile.fsName));
-        args.push("--output " + shellQuote(outputFile.fsName));
-        args.push("--encoder " + shellQuote(options.encoder));
-        args.push("--input-size " + String(options.inputSize));
-        args.push("--device auto");
-        args.push("--clip-low " + String(options.clipLow));
-        args.push("--clip-high " + String(options.clipHigh));
-        args.push("--gamma " + String(options.gamma));
-        args.push("--blur " + String(options.blur));
-
-        if (options.invert) {
-            args.push("--invert");
-        }
-
-        return pythonCommand + " " + args.join(" ");
+    function addEffect(layer, matchName, displayName) {
+        var effects = layer.property("ADBE Effect Parade");
+        return effects.canAddProperty(matchName) ? effects.addProperty(matchName) : effects.addProperty(displayName);
     }
 
-    function buildSequenceCommand(inputFolder, outputFolder, options, fps) {
-        var args = [];
-        var pythonCommand = shellQuote(VENV_PYTHON.fsName);
-        var backendScript = options.sequenceBackend === "vda" ? VDA_SEQUENCE_BACKEND_SCRIPT : SEQUENCE_BACKEND_SCRIPT;
-
-        args.push(shellQuote(backendScript.fsName));
-        args.push("--input-dir " + shellQuote(inputFolder.fsName));
-        args.push("--output-dir " + shellQuote(outputFolder.fsName));
-        args.push("--pattern " + shellQuote("frame_*.png"));
-        args.push("--prefix " + shellQuote(options.sequenceBackend === "vda" ? "vda_depth_" : "depth_"));
-        args.push("--encoder " + shellQuote(options.encoder));
-        args.push("--input-size " + String(options.inputSize));
-        args.push("--device auto");
-        args.push("--clip-low " + String(options.clipLow));
-        args.push("--clip-high " + String(options.clipHigh));
-        args.push("--gamma " + String(options.gamma));
-        args.push("--blur " + String(options.blur));
-
-        if (options.sequenceBackend === "vda") {
-            args.push("--fps " + String(fps));
-        } else {
-            args.push("--temporal-smoothing " + String(options.temporalSmoothing));
-        }
-
-        if (options.invert) {
-            args.push("--invert");
-        }
-
-        return pythonCommand + " " + args.join(" ");
+    // Percent controls are 0..100 on screen but some (like Transition Softness) are 0..1 to scripts.
+    function percentValue(property, percent) {
+        return property.hasMax && property.maxValue <= 1 ? percent / 100 : percent;
     }
 
-    function getCheckpointFile(encoder) {
-        return new File(PROJECT_DIR.fsName + "/backend/vendor/Depth-Anything-V2/checkpoints/depth_anything_v2_" + encoder + ".pth");
-    }
-
-    function getVdaCheckpointFile(encoder) {
-        return new File(PROJECT_DIR.fsName + "/backend/vendor/Video-Depth-Anything/checkpoints/video_depth_anything_" + encoder + ".pth");
-    }
-
-    function generateDepth(inputFile, options) {
-        var outputFile = makeOutputFile(inputFile);
-        var command = buildCommand(inputFile, outputFile, options);
-        var result = system.callSystem(command + " 2>&1");
-
-        if (!outputFile.exists) {
-            throw new Error("Depth generation failed.\n\nCommand:\n" + command + "\n\nOutput:\n" + result);
-        }
-
-        return outputFile;
-    }
-
-    function exportWorkAreaFrames(comp, outputFolder, statusText, win, logFile) {
-        var frameDuration = comp.frameDuration;
-        var startTime = comp.workAreaStart;
-        var duration = comp.workAreaDuration;
-        var frameCount = Math.max(1, Math.ceil(duration / frameDuration - 0.000001));
+    function easeKeys(property) {
         var i;
-        var frameTime;
-        var frameFile;
+        for (i = 1; i <= property.numKeys; i += 1) {
+            property.setTemporalEaseAtKey(i, [new KeyframeEase(0, 33.33)], [new KeyframeEase(0, 33.33)]);
+        }
+    }
 
-        for (i = 0; i < frameCount; i += 1) {
-            frameTime = startTime + (i * frameDuration);
-            frameFile = new File(outputFolder.fsName + "/frame_" + padNumber(i + 1, 6) + ".png");
-            statusText.text = "Exporting frame " + String(i + 1) + " / " + String(frameCount);
-            win.update();
-            appendLog(logFile, "Exporting frame " + String(i + 1) + "/" + String(frameCount) + " at time " + String(frameTime) + " to " + frameFile.fsName);
-            comp.saveFrameToPng(frameTime, frameFile);
+    // The depth layer becomes a hidden control layer: effects read it, it does not render itself.
+    function useAsControlLayer(depthLayer) {
+        depthLayer.enabled = false;
+        depthLayer.guideLayer = false;
+    }
 
-            if (!waitForFile(frameFile, 10000)) {
-                throw new Error("After Effects did not export frame: " + frameFile.fsName);
+    // Gradient Wipe driven by depth: near (bright) areas appear first. Invert Gradient makes the background lead.
+    function applyDepthReveal(targetLayer, depthLayer, startTime, frameDuration) {
+        var wipe = addEffect(targetLayer, "ADBE Gradient Wipe", "Gradient Wipe");
+        var completion = wipe.property(1);
+        var endTime = startTime + Math.round(REVEAL_SECONDS / frameDuration) * frameDuration;
+
+        wipe.name = "Depth Reveal";
+        wipe.property(2).setValue(percentValue(wipe.property(2), 25)); // Transition Softness
+        wipe.property(3).setValue(depthLayer.index); // Gradient Layer
+        wipe.property(4).setValue(3);               // Gradient Placement: Stretch Gradient to Fit
+        completion.setValueAtTime(startTime, percentValue(completion, 100));
+        completion.setValueAtTime(endTime, 0);
+        easeKeys(completion);
+        useAsControlLayer(depthLayer);
+    }
+
+    // Displacement Map driven by depth: near and far move in opposite directions, like a small camera orbit.
+    function applyParallax(targetLayer, depthLayer, startTime, frameDuration, imageWidth) {
+        var displace = addEffect(targetLayer, "ADBE Displacement Map", "Displacement Map");
+        var horizontal = displace.property(3);
+        var amount = Math.max(2, Math.round(imageWidth * PARALLAX_AMOUNT));
+        var endTime = startTime + Math.round(PARALLAX_SECONDS / frameDuration) * frameDuration;
+
+        displace.name = "Depth Parallax";
+        displace.property(1).setValue(depthLayer.index); // Displacement Map Layer (red = green = depth)
+        displace.property(5).setValue(0);                // Max Vertical Displacement
+        displace.property(6).setValue(2);                // Displacement Map Behavior: Stretch Map to Fit
+        horizontal.setValueAtTime(startTime, -amount);
+        horizontal.setValueAtTime(endTime, amount);
+        easeKeys(horizontal);
+        useAsControlLayer(depthLayer);
+    }
+
+    // Sequences: the reveal goes on an adjustment layer above everything, spanning the work area.
+    function addRevealAdjustmentLayer(comp, depthLayer, startTime, duration) {
+        var adjustment = comp.layers.addSolid([1, 1, 1], "Depth Reveal", comp.width, comp.height, comp.pixelAspect, comp.duration);
+        adjustment.adjustmentLayer = true;
+        adjustment.moveToBeginning();
+        adjustment.inPoint = startTime;
+        adjustment.outPoint = startTime + duration;
+        applyDepthReveal(adjustment, depthLayer, startTime, comp.frameDuration);
+        return adjustment;
+    }
+
+    // ---- Jobs ----------------------------------------------------------------------------------
+    // A job advances in small steps (tick) so After Effects stays responsive and Cancel works.
+    // report(text, fraction 0..1) shows progress; tick() returns false once the job has finished.
+    // The finished job has job.result = { status: "done" | "cancelled" | "error", message }.
+
+    // partial: the comp was already being changed when it failed, so Undo is needed to clean up.
+    function finishJob(job, status, message, partial) {
+        job.state = "finished";
+        job.result = { status: status, message: message, partial: !!partial };
+    }
+
+    // Shared Cancel: stop Python, wait until it has exited, then delete this run's files.
+    function cancelStep(job) {
+        if (job.pid && isProcessRunning(job.pid)) {
+            if (!job.stopRequested) {
+                stopProcess(job.pid, false);
+                job.stopRequested = new Date().getTime();
+            } else if (new Date().getTime() - job.stopRequested > STOP_TIMEOUT_MS) {
+                stopProcess(job.pid, true);
             }
+            job.report("Cancelling...", job.fraction || 0);
+            return true;
+        }
+        job.removeRunFiles();
+        finishJob(job, "cancelled", "Cancelled. Nothing was imported.");
+        return false;
+    }
+
+    // Adds the chosen effect to the image layer, driven by its new depth layer.
+    function applyStillEffect(options, imageLayer, depthLayer, comp) {
+        if (options.effect === "none" || !isAlive(imageLayer) || depthLayer.parent !== imageLayer) {
+            return;
+        }
+        if (options.effect === "reveal") {
+            applyDepthReveal(imageLayer, depthLayer, options.effectTime, comp.frameDuration);
+        } else if (options.effect === "parallax") {
+            applyParallax(imageLayer, depthLayer, options.effectTime, comp.frameDuration, depthLayer.source.width);
+        }
+    }
+
+    function createStillJob(comp, layers, options, report) {
+        var job = { state: "launch", index: 0, outputs: [], pid: 0, report: report, fraction: 0 };
+        var current = null;
+
+        function stillName(i) {
+            return layers.length === 1 ? "Generating depth map..." : "Generating depth map " + String(i + 1) + " of " + String(layers.length) + "...";
         }
 
-        return {
-            firstFrame: new File(outputFolder.fsName + "/frame_000001.png"),
-            frameCount: frameCount,
-            startTime: startTime
+        job.removeRunFiles = function () {
+            var i;
+            if (current) {
+                removeTree(current.output);
+                removeTree(current.log);
+            }
+            for (i = 0; i < job.outputs.length; i += 1) {
+                removeTree(job.outputs[i].output);
+            }
         };
+
+        job.cancel = function () {
+            if (job.state !== "finished") {
+                job.state = "cancelling";
+            }
+        };
+
+        job.tick = function () {
+            var i;
+            var footage;
+
+            try {
+                if (job.state === "finished") {
+                    return false;
+                }
+                if (job.state === "cancelling") {
+                    return cancelStep(job);
+                }
+                if (!isAlive(comp)) {
+                    job.cancel();
+                    return true;
+                }
+
+                if (job.state === "launch") {
+                    var inputFile = layers[job.index].source.file;
+                    var stem = OUTPUT_ROOT.fsName + "/" + inputFile.displayName.replace(/\.[^\.]+$/, "") + "_depth_" + uniqueStamp();
+                    current = { output: new File(stem + ".png"), log: new File(stem + ".log"), layer: layers[job.index] };
+                    job.pid = launchBackground(buildCommand(inputFile, current.output, options), current.log);
+                    job.state = "wait";
+                    job.fraction = job.index / layers.length;
+                    report(stillName(job.index), job.fraction);
+                    return true;
+                }
+
+                if (job.state === "wait") {
+                    if (isProcessRunning(job.pid)) {
+                        return true;
+                    }
+                    job.pid = 0;
+                    if (!current.output.exists) {
+                        var failure = lastLines(readText(current.log), 15);
+                        removeTree(current.log);
+                        current = null;
+                        job.removeRunFiles();
+                        finishJob(job, "error", "The model stopped with this message:\n\n" + failure);
+                        return false;
+                    }
+                    removeTree(current.log);
+                    job.outputs.push(current);
+                    current = null;
+                    job.index += 1;
+                    job.state = job.index < layers.length ? "launch" : "import";
+                    return true;
+                }
+
+                if (job.state === "import") {
+                    app.beginUndoGroup("Generate Depth Map");
+                    try {
+                        for (i = 0; i < job.outputs.length; i += 1) {
+                            footage = importDepthMap(job.outputs[i].output, comp, job.outputs[i].layer, options.guideLayer);
+                            applyStillEffect(options, job.outputs[i].layer, footage, comp);
+                        }
+                    } finally {
+                        app.endUndoGroup();
+                    }
+                    report("", 1);
+                    finishJob(job, "done", (job.outputs.length === 1 ? "Imported \"" + footage.name + "\"" : "Imported " + String(job.outputs.length) + " depth maps") + " into the Depth Maps folder.\n\nFiles saved in:\n" + OUTPUT_ROOT.fsName);
+                    return false;
+                }
+            } catch (err) {
+                if (job.pid) {
+                    stopProcess(job.pid, true);
+                }
+                finishJob(job, "error", err.toString(), job.state === "import");
+                return false;
+            }
+            return true;
+        };
+
+        return job;
     }
 
-    function generateDepthSequence(sourceFolder, depthFolder, options, fps, logFile, expectedFrames) {
-        var command = buildSequenceCommand(sourceFolder, depthFolder, options, fps);
-        appendLog(logFile, "Running sequence command: " + command);
-        var result = system.callSystem(command + " 2>&1");
-        var firstFrame = new File(depthFolder.fsName + "/" + (options.sequenceBackend === "vda" ? "vda_depth_" : "depth_") + "frame_000001.png");
-        appendLog(logFile, "Sequence command output:\n" + result);
+    function createSequenceJob(comp, options, report) {
+        var job = { state: "prepare", pid: 0, report: report, fraction: 0 };
+        var folders = null;
+        var frameCount = 0;
+        var frameIndex = 0;
+        var pendingFrame = null;
+        var pendingSince = 0;
+        var startTime = 0;
+        var fps = 1;
+        var importing = false;
 
-        var completed = new File(depthFolder.fsName + "/depth_complete.json");
-        var prefix = options.sequenceBackend === "vda" ? "vda_depth_" : "depth_";
-        var frames = depthFolder.getFiles(prefix + "frame_*.png");
-        if (!firstFrame.exists || !completed.exists || frames.length !== expectedFrames) {
-            throw new Error("Depth sequence generation failed.\n\nCommand:\n" + command + "\n\nOutput:\n" + result);
+        job.removeRunFiles = function () {
+            if (folders) {
+                removeTree(folders.root);
+            }
+        };
+
+        job.cancel = function () {
+            if (job.state !== "finished") {
+                job.state = "cancelling";
+            }
+        };
+
+        function fail(message) {
+            if (folders) {
+                appendLog(folders.log, "ERROR: " + message);
+                message += "\n\nLog:\n" + folders.log.fsName;
+            }
+            finishJob(job, "error", message, importing);
+            return false;
         }
 
-        return firstFrame;
+        // Exports frames for a short slice of time, then hands control back to After Effects.
+        function exportSlice() {
+            var sliceStart = new Date().getTime();
+            var frameFile;
+
+            while (new Date().getTime() - sliceStart < EXPORT_SLICE_MS) {
+                if (pendingFrame) {
+                    if (!pendingFrame.exists) {
+                        if (new Date().getTime() - pendingSince > FRAME_TIMEOUT_MS) {
+                            throw new Error("After Effects did not export frame: " + pendingFrame.fsName);
+                        }
+                        $.sleep(20);
+                        continue;
+                    }
+                    pendingFrame = null;
+                    frameIndex += 1;
+                }
+                if (frameIndex >= frameCount) {
+                    return true;
+                }
+                frameFile = new File(folders.source.fsName + "/frame_" + padNumber(frameIndex + 1, 6) + ".png");
+                comp.saveFrameToPng(startTime + frameIndex * comp.frameDuration, frameFile);
+                pendingFrame = frameFile;
+                pendingSince = new Date().getTime();
+            }
+            return false;
+        }
+
+        job.tick = function () {
+            var progress;
+            var completed;
+            var frames;
+            var firstFrame;
+
+            try {
+                if (job.state === "finished") {
+                    return false;
+                }
+                if (job.state === "cancelling") {
+                    return cancelStep(job);
+                }
+                if (!isAlive(comp)) {
+                    job.cancel();
+                    return true;
+                }
+
+                if (job.state === "prepare") {
+                    folders = makeSequenceFolders(comp);
+                    startTime = comp.workAreaStart;
+                    fps = 1 / comp.frameDuration;
+                    frameCount = Math.max(1, Math.ceil(comp.workAreaDuration / comp.frameDuration - 0.000001));
+                    appendLog(folders.log, "Starting sequence for comp: " + comp.name);
+                    appendLog(folders.log, "Work area start: " + String(startTime) + ", frames: " + String(frameCount) + ", fps: " + String(fps));
+                    job.state = "export";
+                    return true;
+                }
+
+                if (job.state === "export") {
+                    if (exportSlice()) {
+                        job.state = "launch";
+                    }
+                    job.fraction = 0.3 * frameIndex / frameCount;
+                    report("Exporting frame " + String(frameIndex) + " / " + String(frameCount), job.fraction);
+                    return true;
+                }
+
+                if (job.state === "launch") {
+                    var command = buildSequenceCommand(folders.source, folders.depth, options, fps);
+                    appendLog(folders.log, "Running sequence command: " + command);
+                    job.pid = launchBackground(command, new File(folders.root.fsName + "/model_log.txt"));
+                    job.state = "wait";
+                    report("Starting the depth model...", 0.3);
+                    return true;
+                }
+
+                if (job.state === "wait") {
+                    progress = parseSequenceProgress(readText(new File(folders.root.fsName + "/model_log.txt")));
+                    if (progress.phase === "model") {
+                        job.fraction = 0.3 + 0.6 * progress.done / progress.total;
+                        report("Generating depth, block " + String(progress.done) + " / " + String(progress.total), job.fraction);
+                    } else if (progress.phase === "writing") {
+                        job.fraction = 0.9 + 0.1 * progress.done / progress.total;
+                        report("Saving depth frame " + String(progress.done) + " / " + String(progress.total), job.fraction);
+                    }
+                    if (isProcessRunning(job.pid)) {
+                        return true;
+                    }
+                    job.pid = 0;
+                    appendLog(folders.log, "Model output:\n" + readText(new File(folders.root.fsName + "/model_log.txt")));
+                    firstFrame = new File(folders.depth.fsName + "/vda_depth_frame_000001.png");
+                    completed = new File(folders.depth.fsName + "/depth_complete.json");
+                    frames = folders.depth.getFiles("vda_depth_frame_*.png");
+                    if (!firstFrame.exists || !completed.exists || frames.length !== frameCount) {
+                        return fail("The model stopped with this message:\n\n" + lastLines(readText(new File(folders.root.fsName + "/model_log.txt")), 15));
+                    }
+                    importing = true;
+                    app.beginUndoGroup("Generate Work Area Depth Sequence");
+                    try {
+                        var depthLayer = importDepthSequence(firstFrame, comp, options.guideLayer, startTime);
+                        if (options.effect === "reveal") {
+                            addRevealAdjustmentLayer(comp, depthLayer, startTime, frameCount * comp.frameDuration);
+                        }
+                    } finally {
+                        app.endUndoGroup();
+                    }
+                    report("", 1);
+                    finishJob(job, "done", "Imported a " + String(frameCount) + "-frame sequence into the Depth Maps folder.\n\nFiles saved in:\n" + folders.depth.fsName);
+                    return false;
+                }
+            } catch (err) {
+                if (job.pid) {
+                    stopProcess(job.pid, true);
+                }
+                return fail(err.toString());
+            }
+            return true;
+        };
+
+        return job;
     }
 
-    function parseNumberField(field, fallback) {
-        var text = String(field.text).replace(",", ".").replace(/^\s+|\s+$/g, "");
-        var value = text ? Number(text) : NaN;
-        return value;
+    // ---- Window --------------------------------------------------------------------------------
+
+    function formatDuration(ms) {
+        var seconds = Math.max(1, Math.round(ms / 1000));
+        var minutes = Math.floor(seconds / 60);
+        return minutes > 0 ? String(minutes) + " min " + padNumber(seconds % 60, 2) + " s" : String(seconds) + " s";
     }
 
-    function addNumberRow(win, label, defaultValue, chars) {
-        var group = win.add("group");
-        var input;
-
-        group.orientation = "row";
-        group.add("statictext", undefined, label);
-        input = group.add("edittext", undefined, String(defaultValue));
-        input.characters = chars || 6;
-
-        return input;
+    // Final message: what was made and how long it took, or why it failed.
+    function resultMessage(result, kind, elapsedMs) {
+        var what = kind === "still" ? "Depth map" : "Depth sequence";
+        if (result.status === "done") {
+            return what + " done in " + formatDuration(elapsedMs) + ".\n\n" + result.message;
+        }
+        if (result.partial) {
+            return what + " failed while adding it to the comp. Press Undo (Cmd+Z) once to remove what was added.\n\n" + result.message;
+        }
+        return what + " failed. Nothing was imported.\n\n" + result.message;
     }
 
     function createWindow() {
         var win = new Window("palette", "Depth Map Tool");
-        var selectedText;
-        var staticLabel;
-        var sequenceLabel;
-        var inputButton;
-        var generateButton;
-        var generateSequenceButton;
-        var encoderGroup;
-        var encoderList;
-        var sequenceBackendGroup;
-        var sequenceBackendList;
-        var sizeGroup;
-        var sizeInput;
-        var clipLowInput;
-        var clipHighInput;
-        var gammaInput;
-        var blurInput;
-        var temporalSmoothingGroup;
-        var temporalSmoothingInput;
-        var invertCheckbox;
+        var tickName = "__pedroDepthMapTick_" + uniqueStamp();
+        var taskId = 0;
+        var job = null;
+        var jobKind = "";
+        var jobStarted = 0;
+        var qualityGroup;
+        var qualityList;
         var guideLayerCheckbox;
+        var effectGroup;
+        var effectList;
+        var generateButton;
+        var progressBar;
         var statusText;
-        var inputFile = getSelectedFootageFile();
 
         win.orientation = "column";
         win.alignChildren = ["fill", "top"];
         win.spacing = 10;
         win.margins = 16;
 
-        var notice = win.add("statictext", undefined, "Experimental — local inference; no models bundled. Output files are not removed by Undo.\nWhile a depth map is generating, After Effects stops responding until it finishes; there is no cancel. Start with a short work area.", { multiline: true });
+        var notice = win.add("statictext", undefined, "Select still image layers to get one depth map each. With nothing selected, the comp work area becomes a depth sequence.\nAfter Effects stays usable while it generates; the window closes and tells you when it is done.", { multiline: true });
         notice.preferredSize = [360, 64];
-        selectedText = win.add("statictext", undefined, "");
-        selectedText.preferredSize.width = 360;
 
-        staticLabel = win.add("statictext", undefined, "1. Static image");
-        staticLabel.preferredSize.width = 360;
-        inputButton = win.add("button", undefined, "Choose Image...");
+        qualityGroup = win.add("group");
+        qualityGroup.orientation = "row";
+        qualityGroup.add("statictext", undefined, "Still quality");
+        qualityList = qualityGroup.add("dropdownlist", undefined, QUALITY_LABELS);
+        qualityList.selection = 0;
 
-        encoderGroup = win.add("group");
-        encoderGroup.orientation = "row";
-        encoderGroup.add("statictext", undefined, "Encoder");
-        encoderList = encoderGroup.add("dropdownlist", undefined, ENCODER_LABELS);
-        encoderList.selection = 0;
+        effectGroup = win.add("group");
+        effectGroup.orientation = "row";
+        effectGroup.add("statictext", undefined, "Effect");
+        effectList = effectGroup.add("dropdownlist", undefined, EFFECT_LABELS);
+        effectList.selection = 0;
+        effectList.helpTip = "Depth Reveal: the image appears near-first (Gradient Wipe). Parallax: a small 3D camera move (Displacement Map). Keys start at the current time.";
 
-        sequenceBackendGroup = win.add("group");
-        sequenceBackendGroup.orientation = "row";
-        sequenceBackendGroup.add("statictext", undefined, "Sequence backend");
-        sequenceBackendList = sequenceBackendGroup.add("dropdownlist", undefined, SEQUENCE_BACKEND_LABELS);
-        sequenceBackendList.selection = 0;
-
-        sizeGroup = win.add("group");
-        sizeGroup.orientation = "row";
-        sizeGroup.add("statictext", undefined, "Input size");
-        sizeInput = sizeGroup.add("edittext", undefined, String(DEFAULT_INPUT_SIZE));
-        sizeInput.characters = 6;
-
-        clipLowInput = addNumberRow(win, "Clip low %", 0, 6);
-        clipHighInput = addNumberRow(win, "Clip high %", 100, 6);
-        gammaInput = addNumberRow(win, "Gamma", 1, 6);
-        blurInput = addNumberRow(win, "Blur px", 0, 6);
-        temporalSmoothingGroup = win.add("group");
-        temporalSmoothingGroup.orientation = "row";
-        temporalSmoothingGroup.add("statictext", undefined, "Temporal smoothing");
-        temporalSmoothingInput = temporalSmoothingGroup.add("edittext", undefined, "0");
-        temporalSmoothingInput.characters = 6;
-
-        invertCheckbox = win.add("checkbox", undefined, "Invert depth");
         guideLayerCheckbox = win.add("checkbox", undefined, "Import as guide layer");
         guideLayerCheckbox.value = true;
 
-        generateButton = win.add("button", undefined, "Generate Static Depth Map");
-        sequenceLabel = win.add("statictext", undefined, "2. Active comp work area");
-        sequenceLabel.preferredSize.width = 360;
-        generateSequenceButton = win.add("button", undefined, "Generate Comp Work Area Sequence");
+        generateButton = win.add("button", undefined, "Generate");
+        progressBar = win.add("progressbar", undefined, 0, 100);
+        progressBar.preferredSize = [360, 8];
         statusText = win.add("statictext", undefined, "");
         statusText.preferredSize.width = 360;
 
-        function getSelectedSequenceBackend() {
-            return sequenceBackendList.selection && sequenceBackendList.selection.text === "Video Depth Anything" ? "vda" : "batch";
+        function report(text, fraction) {
+            if (text) {
+                statusText.text = text;
+            }
+            progressBar.value = Math.round(100 * Math.max(0, Math.min(1, fraction)));
         }
 
-        function syncSequenceBackendUi() {
-            var isBatch = getSelectedSequenceBackend() === "batch";
-            temporalSmoothingInput.enabled = isBatch;
-            temporalSmoothingGroup.enabled = isBatch;
-            if (!isBatch) {
-                temporalSmoothingInput.text = "0";
+        function setRunning(running) {
+            generateButton.text = running ? "Cancel" : "Generate";
+            qualityGroup.enabled = !running;
+            guideLayerCheckbox.enabled = !running;
+            effectGroup.enabled = !running;
+        }
+
+        function stopTicking() {
+            if (taskId) {
+                app.cancelTask(taskId);
+                taskId = 0;
             }
         }
 
-        function refreshInputLabel() {
-            selectedText.text = inputFile ? "Static input: " + inputFile.fsName : "Static input: selected footage or choose an image";
-        }
-
-        inputButton.onClick = function () {
-            var picked = File.openDialog("Choose a static image", "*.png;*.jpg;*.jpeg;*.tif;*.tiff");
-            if (picked) {
-                inputFile = picked;
-                refreshInputLabel();
+        $.global[tickName] = function () {
+            var keepGoing;
+            if (!job) {
+                stopTicking();
+                return;
+            }
+            keepGoing = job.tick();
+            if (!keepGoing) {
+                var result = job.result;
+                var message = resultMessage(result, jobKind, new Date().getTime() - jobStarted);
+                stopTicking();
+                job = null;
+                if (result.status === "done") {
+                    win.close();
+                    alert(message, "Depth Map Tool");
+                    return;
+                }
+                setRunning(false);
+                progressBar.value = 0;
+                statusText.text = result.status === "error" ? "Failed." : result.message;
+                if (result.status === "error") {
+                    alert(message, "Depth Map Tool", true);
+                }
             }
         };
 
-        sequenceBackendList.onChange = syncSequenceBackendUi;
-
-        function readOptions(isSequence) {
-            var encoder = encoderList.selection ? encoderList.selection.text.split(" ")[0] : DEFAULT_ENCODER;
-            var inputSize = Number(sizeInput.text);
-            var clipLow = parseNumberField(clipLowInput, 0);
-            var clipHigh = parseNumberField(clipHighInput, 100);
-            var gamma = parseNumberField(gammaInput, 1);
-            var blur = parseNumberField(blurInput, 0);
-            var temporalSmoothing = parseNumberField(temporalSmoothingInput, 0);
-            var checkpointFile = getCheckpointFile(encoder);
-            var sequenceBackend = getSelectedSequenceBackend();
-            var vdaCheckpointFile = getVdaCheckpointFile(encoder);
-            var options;
-
-            if ($.os.indexOf("Mac") < 0) { alert("The AE launcher currently supports macOS only. See README for CLI usage."); return null; }
-            if (!VENV_PYTHON.exists) { alert("Python environment not installed. Follow depth-map/README.md before using this panel."); return null; }
-
-            if (!BACKEND_SCRIPT.exists) {
-                alert("Backend script not found: " + BACKEND_SCRIPT.fsName);
-                return null;
-            }
-
-            if (!SEQUENCE_BACKEND_SCRIPT.exists) {
-                alert("Sequence backend script not found: " + SEQUENCE_BACKEND_SCRIPT.fsName);
-                return null;
-            }
-
-            if (!VDA_SEQUENCE_BACKEND_SCRIPT.exists) {
-                alert("VDA sequence backend script not found: " + VDA_SEQUENCE_BACKEND_SCRIPT.fsName);
-                return null;
-            }
-
-            if ((!isSequence || sequenceBackend === "batch") && !checkpointFile.exists) {
-                alert(
-                    "Checkpoint not installed for encoder '" + encoder + "'.\n\n" +
-                    "No weights are bundled. Download the selected model separately (see README).\n\n" +
-                    "Expected file:\n" + checkpointFile.fsName
-                );
-                return null;
-            }
-
-            if (isSequence && sequenceBackend === "vda" && !vdaCheckpointFile.exists) {
-                alert(
-                    "Video Depth Anything checkpoint not installed for encoder '" + encoder + "'.\n\n" +
-                    "No weights are bundled. Download the selected model separately (see README).\n\n" +
-                    "Expected file:\n" + vdaCheckpointFile.fsName
-                );
-                return null;
-            }
-
-            if (!isFinite(inputSize) || inputSize !== Math.floor(inputSize) || inputSize < 64 || inputSize > 4096) {
-                alert("Input size must be a whole number between 64 and 4096.");
-                return null;
-            }
-
-            if (!isFinite(clipLow) || !isFinite(clipHigh) || clipLow < 0 || clipHigh > 100 || clipLow >= clipHigh) {
-                alert("Clip low/high must be valid percentiles between 0 and 100.");
-                return null;
-            }
-
-            if (!isFinite(gamma) || gamma <= 0) {
-                alert("Gamma must be greater than 0.");
-                return null;
-            }
-
-            if (!isFinite(blur) || blur < 0 || blur > 100) {
-                alert("Blur must be between 0 and 100 px.");
-                return null;
-            }
-
-            if (!isFinite(temporalSmoothing) || temporalSmoothing < 0 || temporalSmoothing >= 1) {
-                alert("Temporal smoothing must be >= 0 and < 1.");
-                return null;
-            }
-
-            options = {
-                encoder: encoder,
-                inputSize: inputSize,
-                clipLow: clipLow,
-                clipHigh: clipHigh,
-                gamma: gamma,
-                blur: blur,
-                temporalSmoothing: temporalSmoothing,
-                sequenceBackend: sequenceBackend,
-                invert: invertCheckbox.value
-            };
-
-            return options;
+        function startJob(newJob, kind) {
+            job = newJob;
+            jobKind = kind;
+            jobStarted = new Date().getTime();
+            setRunning(true);
+            report("Starting...", 0);
+            taskId = app.scheduleTask(tickName + "()", TICK_MS, true);
         }
 
         generateButton.onClick = function () {
-            var options = readOptions(false);
-            var outputFile;
+            var comp;
+            var plan;
+            var setupError;
+            var frameCount;
+            var options;
+            var effect;
 
-            if (!options) {
+            if (job) {
+                job.cancel();
+                generateButton.text = "Cancelling...";
                 return;
             }
 
-            if (!inputFile || !inputFile.exists) {
-                inputFile = getSelectedFootageFile();
-            }
-
-            if (!inputFile || !inputFile.exists) {
-                alert("Select one footage layer with a source file, or choose an image manually.");
-                return;
-            }
-
-            if (!chooseOutputFolder()) return;
-            app.beginUndoGroup("Generate Static Depth Map");
-            try {
-                statusText.text = "Generating... After Effects will not respond until this finishes.";
-                win.update();
-                outputFile = generateDepth(inputFile, options);
-                importDepthMap(outputFile, guideLayerCheckbox.value);
-                statusText.text = "Imported: " + outputFile.fsName;
-            } catch (err) {
-                statusText.text = "Error.";
-                alert(err.toString());
-            } finally {
-                app.endUndoGroup();
-            }
-        };
-
-        generateSequenceButton.onClick = function () {
-            var options = readOptions(true);
-            var comp = getActiveComp();
-            var folders;
-            var exportResult;
-            var firstDepthFrame;
-
-            if (!options) {
-                return;
-            }
-
+            comp = getActiveComp();
             if (!comp) {
-                alert("Open a composition before generating a work area sequence.");
+                alert("Open a composition first.");
                 return;
             }
 
-            if (comp.workAreaDuration <= 0) {
-                alert("The active comp work area has no duration.");
+            plan = planFromSelection(comp);
+            if (plan.error) {
+                alert(plan.error);
                 return;
             }
 
-            if (Math.ceil(comp.workAreaDuration / comp.frameDuration - 0.000001) > 300) {
-                alert("This beta limits the panel to 300 frames. Shorten the work area; advanced CLI users can override --max-frames.");
+            setupError = checkSetup(plan.mode);
+            if (setupError) {
+                alert(setupError);
                 return;
             }
-            if (comp.workAreaStart < 0 || comp.workAreaStart + comp.workAreaDuration > comp.duration + 0.000001) {
-                alert("Keep the work area inside the composition."); return;
-            }
-            if (!chooseOutputFolder()) return;
 
-            app.beginUndoGroup("Generate Work Area Depth Sequence");
-            try {
-                statusText.text = "Using " + (options.sequenceBackend === "vda" ? "Video Depth Anything" : "Frame batch") + ". Static input is ignored.";
-                win.update();
-                folders = makeSequenceFolders(comp);
-                appendLog(folders.log, "Starting sequence for comp: " + comp.name);
-                appendLog(folders.log, "Work area start: " + String(comp.workAreaStart) + ", duration: " + String(comp.workAreaDuration) + ", frame duration: " + String(comp.frameDuration));
-                exportResult = exportWorkAreaFrames(comp, folders.source, statusText, win, folders.log);
-                statusText.text = "Generating depth sequence... After Effects will not respond until this finishes.";
-                win.update();
-                firstDepthFrame = generateDepthSequence(folders.source, folders.depth, options, 1 / comp.frameDuration, folders.log, exportResult.frameCount);
-                appendLog(folders.log, "Importing first depth frame: " + firstDepthFrame.fsName);
-                importDepthSequence(firstDepthFrame, comp, guideLayerCheckbox.value, exportResult.startTime);
-                statusText.text = "Imported sequence: " + folders.depth.fsName;
-            } catch (err) {
-                statusText.text = "Error.";
-                if (folders && folders.log) {
-                    appendLog(folders.log, "ERROR: " + err.toString());
-                    alert(err.toString() + "\n\nLog:\n" + folders.log.fsName);
-                } else {
-                    alert(err.toString());
+            if (plan.mode === "sequence") {
+                if (comp.workAreaDuration <= 0) {
+                    alert("The comp work area has no duration.");
+                    return;
                 }
-            } finally {
-                app.endUndoGroup();
+                frameCount = Math.ceil(comp.workAreaDuration / comp.frameDuration - 0.000001);
+                if (frameCount > MAX_SEQUENCE_FRAMES) {
+                    alert("The work area has " + String(frameCount) + " frames. This beta allows up to " + String(MAX_SEQUENCE_FRAMES) + "; shorten the work area.");
+                    return;
+                }
+                if (comp.workAreaStart < 0 || comp.workAreaStart + comp.workAreaDuration > comp.duration + 0.000001) {
+                    alert("Keep the work area inside the composition.");
+                    return;
+                }
             }
+
+            effect = EFFECT_KINDS[effectList.selection ? effectList.selection.index : 0];
+            if (effect === "parallax" && plan.mode !== "still") {
+                alert("Parallax works on still images only. Select still image layers, or choose None or Depth Reveal for a sequence.");
+                return;
+            }
+
+            if (!chooseOutputFolder()) {
+                return;
+            }
+
+            options = {
+                effect: effect,
+                effectTime: plan.mode === "still" ? comp.time : comp.workAreaStart,
+                inputSize: plan.mode === "still" ? QUALITY_INPUT_SIZES[qualityList.selection ? qualityList.selection.index : 0] : SEQUENCE_INPUT_SIZE,
+                guideLayer: guideLayerCheckbox.value
+            };
+
+            startJob(plan.mode === "still" ? createStillJob(comp, plan.layers, options, report) : createSequenceJob(comp, options, report), plan.mode);
         };
 
-        refreshInputLabel();
-        syncSequenceBackendUi();
+        // Closing the window cancels a running job and cleans up its files.
+        win.onClose = function () {
+            var waited = 0;
+            stopTicking();
+            if (job) {
+                job.cancel();
+                while (job.tick() && waited < STOP_TIMEOUT_MS + 2000) {
+                    $.sleep(100);
+                    waited += 100;
+                }
+                job = null;
+            }
+            $.global[tickName] = undefined;
+            return true;
+        };
+
         return win;
     }
 
