@@ -1,16 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.4.0-beta.1 — 2026-10-12
 
-- Depth Map: files always go into a "Depth Maps" folder on disk; for an unsaved project it is created inside the folder you choose instead of filling that folder.
-- Depth Map: stills reuse an existing depth map for the same image and quality instead of generating again (Option-click Generate to regenerate); the Project panel item is reused too.
-- Depth Map: `install.command` sets everything up with a double-click (Python environment, pinned model code, verified Small checkpoints, environment check); verified from an empty folder.
-- Depth Map: new Depth Sweep effect — a band of light travels from near to far (two depth-driven Gradient Wipes on an Add solid, with a Sweep Width slider).
-- Depth Map: one Generate button that follows the selection. Selected still images get one depth map each, placed above their layer with the same timing and parented to it, so they match its position, scale and animation; with nothing selected (or a video/precomp layer) the work area becomes a Video Depth Anything sequence. Fixes the window keeping the selection from when it was opened.
-- Depth Map: removed Choose Image, Encoder, Clip, Gamma, Blur, Invert, Frame batch and Temporal smoothing from the panel (do contrast, blur and invert in AE, where they stay editable; the CLIs keep their flags). New Still quality option (Normal/High); sequences stay at Normal because higher sizes ran out of GPU memory on Apple Silicon.
-- Depth Map: outputs go to a "Depth Maps" folder next to the saved project, without a dialog, and are imported into a "Depth Maps" folder in the Project panel. The window closes when a run finishes, with a message saying what was imported and how long it took; failures show the reason.
-- Depth Map: optional Effect after generating — Depth Reveal (Gradient Wipe driven by depth, near areas first; on an adjustment layer for sequences) or Parallax for stills (Displacement Map driven by depth), keyed from the current time.
-- Depth Map: generation runs in the background, so After Effects stays usable; the panel shows progress and Generate turns into Cancel. Cancelling (or closing the window/project) stops Python, imports nothing and deletes that run's files.
+Depth Map overhaul.
+
+- One **Generate** button that follows the selection: selected still images get one depth map each, placed above their layer and parented to it, so they match its position, scale and animation; with nothing selected (or a video/precomp layer) the work area becomes a Video Depth Anything sequence. Fixes the window keeping the selection from when it was opened.
+- Generation runs in the background, so After Effects stays usable; the panel shows progress and Generate turns into **Cancel**. Cancelling (or closing the window/project) stops Python, imports nothing and deletes that run's files. When it finishes, the window closes with a message saying what was imported and how long it took; failures show the reason.
+- Optional **Effect** after generating, built from standard AE effects: **Depth Reveal** (Gradient Wipe driven by depth, near areas first; on an adjustment layer for sequences), **Depth Sweep** (a band of light travels from near to far) and **Parallax** for stills (Displacement Map driven by depth), keyed from the current time.
+- Stills reuse an existing depth map for the same image and quality instead of generating again (Option-click Generate to regenerate); the Project panel item is reused too.
+- Files always go into a "Depth Maps" folder on disk (next to the saved project, or inside the folder you choose) and into a "Depth Maps" folder in the Project panel.
+- Simpler panel: removed Choose Image, Encoder, Clip, Gamma, Blur, Invert, Frame batch and Temporal smoothing (do contrast, blur and invert in AE, where they stay editable; the CLIs keep their flags). New **Still quality** (Normal/High); sequences stay at Normal because higher sizes ran out of GPU memory on Apple Silicon.
+- `install.command` sets everything up with a double-click (Python environment, pinned model code, verified Small checkpoints, environment check); verified from an empty folder.
+- Newer depth models were compared (Depth Anything 3, MoGe-2, Distill Any Depth); the current Small models at High quality gave the best detail, so they stay.
 
 ## 0.3.0-beta.1 — 2026-10-10
 
