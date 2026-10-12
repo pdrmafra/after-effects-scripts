@@ -93,4 +93,4 @@ All CLIs accept `--help`. Sequence filenames are naturally sorted; frame count m
 
 ## Future work
 
-A first comparison of newer models (Depth Anything 3, MoGe-2, Distill Any Depth) on sample images found no clear replacement for the current Small models; MoGe-2 Large is the candidate for cleaner edges on stills, pending tests on real motion-design footage.
+Newer models (Depth Anything 3, MoGe-2, Distill Any Depth) were compared on Apple Silicon in October 2026 with sample images and free photos (portrait hair, bare branches, bicycles, interiors). None beat the current Small model at **High** still quality, which kept the finest branches and bicycle spokes; MoGe-2 Large filled bicycle wheels and cut hair edges, Depth Anything 3 broke thin branches, Distill Any Depth matched the current model. The Small models stay.
