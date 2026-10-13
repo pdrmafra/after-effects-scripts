@@ -4,7 +4,7 @@ const vm = require("node:vm");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const source=fs.readFileSync(path.join(__dirname,"../depth-map/jsx/DepthMapStatic.jsx"),"utf8");
-const EXPOSED="depthTest={shellQuote:shellQuote,buildCommand:buildCommand,buildSequenceCommand:buildSequenceCommand,planFromSelection:planFromSelection,buildLaunchCommand:buildLaunchCommand,parseSequenceProgress:parseSequenceProgress,createStillJob:createStillJob,cachedDepthFile:cachedDepthFile,chooseOutputFolder:chooseOutputFolder,getOutputRoot:function(){return OUTPUT_ROOT;},getProjectFolder:getProjectFolder,resultMessage:resultMessage,applyDepthReveal:applyDepthReveal,applyParallax:applyParallax,addSweepLayer:addSweepLayer,setOutputRoot:function(f){OUTPUT_ROOT=f;}};";
+const EXPOSED="depthTest={shellQuote:shellQuote,buildCommand:buildCommand,buildSequenceCommand:buildSequenceCommand,planFromSelection:planFromSelection,buildLaunchCommand:buildLaunchCommand,parseSequenceProgress:parseSequenceProgress,createStillJob:createStillJob,cachedDepthFile:cachedDepthFile,chooseOutputFolder:chooseOutputFolder,getOutputRoot:function(){return OUTPUT_ROOT;},getProjectFolder:getProjectFolder,resultMessage:resultMessage,applyDepthReveal:applyDepthReveal,applyParallax:applyParallax,addSweepLayer:addSweepLayer,addOwnSolid:addOwnSolid,setOutputRoot:function(f){OUTPUT_ROOT=f;}};";
 function helpers(){
   const c=vm.createContext({});
   vm.runInContext(`var disk={};
@@ -221,7 +221,7 @@ test("Parallax: Displacement Map reads the depth layer and moves horizontally on
 test("Depth Sweep: a white Add solid keeps only a depth band that travels from near to far, then fades",()=>{
   const c=helpers();
   run(c,`var BlendingMode={ADD:"add",NORMAL:"normal"}; app.project={rootFolder:{numItems:0,item:function(){}},items:{addFolder:function(n){return new FolderItem(n);}}};
-    var solid=fakeLayer(1); solid.source={}; solid.inPoint=0; solid.outPoint=10; var opacity=fakeProperty(); solid.moveToBeginning=function(){this.top=true;};
+    var solid=fakeLayer(1); solid.source={parentFolder:app.project.rootFolder}; solid.inPoint=0; solid.outPoint=10; var opacity=fakeProperty(); solid.moveToBeginning=function(){this.top=true;};
     var base=solid.property; solid.property=function(n){return n==="ADBE Transform Group"?{property:function(){return opacity;}}:base(n);};
     var comp={frameDuration:1/24,width:1920,height:1080,duration:10,layers:{addSolid:function(color,name,w,h){solid.args=[color,name,w,h];return solid;}}};
     var depth=fakeLayer(2); depthTest.addSweepLayer(comp,depth,null,1920,1080,2);`);
@@ -233,6 +233,18 @@ test("Depth Sweep: a white Add solid keeps only a depth band that travels from n
   assert.deepEqual(JSON.parse(run(c,"JSON.stringify(solid.effects[2].props[4].values)")),[1]);   // Invert Gradient on the back wipe
   assert.deepEqual(JSON.parse(run(c,"JSON.stringify(opacity.keys.map(function(k){return k[1];}))")),[100,0]);
   assert.equal(run(c,"depth.enabled"),false);
+});
+test("a Solids folder that After Effects creates for the effect layer is removed once empty, an existing one is kept",()=>{
+  const c=helpers();
+  run(c,`var rootItems=[], removed=[]; app.project={rootFolder:{get numItems(){return rootItems.length;},item:function(i){return rootItems[i-1];}},
+      items:{addFolder:function(n){var f=new FolderItem(n);f.id=100+rootItems.length;f.numItems=0;rootItems.push(f);return f;}}};
+    function solidsFolder(id){var f=new FolderItem("Sólidos");f.id=id;f.items=[];Object.defineProperty(f,"numItems",{get:function(){return f.items.length;}});f.remove=function(){removed.push(id);rootItems.splice(rootItems.indexOf(f),1);};return f;}
+    var comp={duration:5,layers:{addSolid:function(){var folder=null;for(var i=0;i<rootItems.length;i++)if(rootItems[i].name==="Sólidos")folder=rootItems[i];if(!folder){folder=solidsFolder(7);rootItems.push(folder);}
+      var source={},parent=folder;folder.items.push(source);Object.defineProperty(source,"parentFolder",{get:function(){return parent;},set:function(v){parent.items.splice(parent.items.indexOf(source),1);parent=v;}});return {source:source};}}};`);
+  run(c,"depthTest.addOwnSolid(comp,'Depth Sweep',100,100,1);");
+  assert.deepEqual(JSON.parse(run(c,"JSON.stringify([removed,rootItems.map(function(f){return f.name;})])")),[[7],["Depth Maps"]]);
+  run(c,"rootItems.push(solidsFolder(8)); rootItems[1].items.push({}); depthTest.addOwnSolid(comp,'Depth Reveal',100,100,1);");
+  assert.deepEqual(JSON.parse(run(c,"JSON.stringify(removed)")),[7]);   // the user's own Solids folder stays
 });
 test("Parallax is refused for sequences before anything runs",()=>{
   assert.match(source,/effect === "parallax" && plan\.mode !== "still"\) \{\s*alert\("Parallax works on still images only/);

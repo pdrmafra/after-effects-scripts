@@ -379,10 +379,15 @@ var PedroStrokeGeometry = (function () {
         for(i=0;i<4;i++) { if(!straight(s,i)) return null; edges.push(sub(s.vertices[(i+1)%4],s.vertices[i])); }
         var lens=[];
         for(i=0;i<4;i++) { lens.push(length(edges[i])); if(lens[i]<EPS) fail("Degenerate rectangle."); }
+        // After Effects stores path points as 32-bit floats: a thin rotated bar comes back with corners off by up to
+        // ~0.00001 of the coordinate size (0.00002 px on a 62 x 8 needle). Both checks allow that much jitter, no more.
+        var span=Math.max(1,lens[0],lens[1]);
+        for(i=0;i<4;i++) span=Math.max(span,Math.abs(s.vertices[i][0]),Math.abs(s.vertices[i][1]));
+        var jitter=0.00001*span;
         for(i=0;i<4;i++) {
-            if(Math.abs(dot(unit(edges[i]),unit(edges[(i+1)%4])))>0.00001) fail("Four-point path is not an orthogonal rectangle.");
+            if(Math.abs(dot(unit(edges[i]),unit(edges[(i+1)%4])))>0.00001+2*jitter/Math.min(lens[i],lens[(i+1)%4])) fail("Four-point path is not an orthogonal rectangle.");
         }
-        if(length(add(edges[0],edges[2]))>EPS*Math.max(1,lens[0]) || length(add(edges[1],edges[3]))>EPS*Math.max(1,lens[1])) fail("Opposite rectangle edges do not match.");
+        if(length(add(edges[0],edges[2]))>jitter || length(add(edges[1],edges[3]))>jitter) fail("Opposite rectangle edges do not match.");
         var center=mul(add(s.vertices[0],s.vertices[2]),0.5), axis=direction(lens[0]>=lens[1] ? edges[0] : edges[1]);
         return model(center,axis,Math.max(lens[0],lens[1]),Math.min(lens[0],lens[1]),1,"Bezier rectangle",0);
     }

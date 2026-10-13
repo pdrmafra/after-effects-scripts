@@ -4,6 +4,8 @@
     #include "../src/core.jsxinc"
     var lines = [], created = [], ownedSources = [], oldActive = app.project.activeItem;
     var oldSelection = app.project.selection, passed = 0, failed = 0;
+    // Nulls make After Effects add a root "Solids" folder; new folders left empty are removed at the end.
+    var rootBefore = {}; for (var r = 1; r <= app.project.rootFolder.numItems; r++) rootBefore[app.project.rootFolder.item(r).id] = true;
     function assert(condition, message) { if (!condition) throw new Error(message || "Assertion failed"); }
     function near(a,b) { return Math.abs(a-b)<0.00001; }
     function test(name, action) {
@@ -186,6 +188,7 @@
             catch(error) { lines.push("SOLID CLEANUP FAILED "+error.toString()); failed++; }
         }
         // Restore project-panel selection; no user layer was edited or selected.
+        for(i=app.project.rootFolder.numItems;i>=1;i--) { var leftover=app.project.rootFolder.item(i); if(leftover instanceof FolderItem&&!rootBefore[leftover.id]&&leftover.numItems===0) leftover.remove(); }
         for(i=0;i<oldSelection.length;i++) { try{oldSelection[i].selected=true;}catch(error){} }
         if(oldActive instanceof CompItem) { try{oldActive.openInViewer();}catch(error){} }
         app.endUndoGroup();

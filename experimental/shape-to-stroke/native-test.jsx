@@ -7,6 +7,8 @@
     #include "settings.jsxinc"
     #include "fixtures.jsxinc"
     var owned=[],lines=[],passed=0,failed=0,oldActive=app.project.activeItem,oldSelection=app.project.selection;
+    // After Effects can add a root folder (such as "Solids") while fixtures run; empty new ones are removed at the end.
+    var rootBefore={};for(var r=1;r<=app.project.rootFolder.numItems;r++)rootBefore[app.project.rootFolder.item(r).id]=true;
     var outputDir=new File($.fileName).parent;
     function assert(ok,message) {if(!ok) throw new Error(message || "Assertion failed.");}
     function near(a,b) {return Math.abs(a-b)<0.0001;}
@@ -197,6 +199,7 @@
         });
     } finally {
         for(var i=owned.length-1;i>=0;i--) {try{owned[i].remove();}catch(e){failed++;lines.push("CLEANUP FAILED "+e.toString());}}
+        for(i=app.project.rootFolder.numItems;i>=1;i--) {var leftover=app.project.rootFolder.item(i);if(leftover instanceof FolderItem&&!rootBefore[leftover.id]&&leftover.numItems===0)leftover.remove();}
         for(i=0;i<oldSelection.length;i++) {try{oldSelection[i].selected=true;}catch(e){}}
         if(oldActive instanceof CompItem) {try{oldActive.openInViewer();}catch(e){}}
         app.endUndoGroup();

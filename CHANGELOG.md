@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Shape to Stroke: thin rotated bars read back from After Effects are recognised again (path points are stored as 32-bit floats; the rectangle checks now tolerate that rounding).
+- Depth Map: Depth Sweep and sequence Depth Reveal no longer leave an empty "Solids" folder in the project.
+- Native AE suites (core, Shape to Stroke, Depth Map) run and passed in AE 26.5; see docs/validation.md.
 - Keyframe Tools: the N tile shows its number drawn large (After Effects on macOS ignores font sizes in script panels); click it to type a new value and press Enter.
 
 ## 0.4.0-beta.1 — 2026-10-12

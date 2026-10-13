@@ -387,6 +387,28 @@
         }
     }
 
+    // Adds a white solid layer whose source lives in the Depth Maps project folder. After Effects files new solids
+    // in a "Solids" folder (named in the AE language) and creates it if needed; if it was created just now and ends up
+    // empty, it is removed so the user's project gains only the Depth Maps folder.
+    function addOwnSolid(comp, name, width, height, pixelAspect) {
+        var root = app.project.rootFolder;
+        var existing = {};
+        var layer;
+        var solidsFolder;
+        var i;
+
+        for (i = 1; i <= root.numItems; i += 1) {
+            existing[root.item(i).id] = true;
+        }
+        layer = comp.layers.addSolid([1, 1, 1], name, width, height, pixelAspect, comp.duration);
+        solidsFolder = layer.source.parentFolder;
+        layer.source.parentFolder = getProjectFolder();
+        if (solidsFolder && solidsFolder !== root && !existing[solidsFolder.id] && solidsFolder.numItems === 0) {
+            solidsFolder.remove();
+        }
+        return layer;
+    }
+
     // The project item already using this file, if the depth map was imported before.
     function findFootage(file) {
         var items = app.project.items;
@@ -532,7 +554,7 @@
     // With an image layer the solid matches the image and is parented to it; otherwise it covers the comp.
     function addSweepLayer(comp, depthLayer, imageLayer, width, height, startTime) {
         var duration = Math.round(SWEEP_SECONDS / comp.frameDuration) * comp.frameDuration;
-        var sweep = comp.layers.addSolid([1, 1, 1], "Depth Sweep", width, height, 1, comp.duration);
+        var sweep = addOwnSolid(comp, "Depth Sweep", width, height, 1);
         var front;
         var back;
         var bandWidth;
@@ -541,7 +563,6 @@
         var wipe;
         var i;
 
-        sweep.source.parentFolder = getProjectFolder();
         sweep.blendingMode = BlendingMode.ADD;
         if (imageLayer) {
             sweep.moveBefore(depthLayer);
@@ -585,8 +606,7 @@
 
     // Sequences: the reveal goes on an adjustment layer above everything, spanning the work area.
     function addRevealAdjustmentLayer(comp, depthLayer, startTime, duration) {
-        var adjustment = comp.layers.addSolid([1, 1, 1], "Depth Reveal", comp.width, comp.height, comp.pixelAspect, comp.duration);
-        adjustment.source.parentFolder = getProjectFolder();
+        var adjustment = addOwnSolid(comp, "Depth Reveal", comp.width, comp.height, comp.pixelAspect);
         adjustment.adjustmentLayer = true;
         adjustment.moveToBeginning();
         adjustment.inPoint = startTime;

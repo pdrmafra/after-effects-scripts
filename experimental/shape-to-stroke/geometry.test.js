@@ -21,6 +21,19 @@ for(const rounded of [false,true]) for(const angle of [0,30,90,145,225,270]) {
     assert.equal(m.cap,rounded?2:1);assert.deepEqual(m.center,[123,-45]);
   });
 }
+test("a thin rotated bar read back from After Effects (32-bit points) is still a rectangle",()=>{
+  // Gauge needle as AE 26.5 returned it: opposite edges differ by 0.0000216 px after float32 rounding.
+  const back=[[-4.99734497070312,10.1631469726562],[30.5644073486328,-40.6242828369141],[37.1176147460938,-36.0356597900391],[1.55587768554688,14.7517547607422]];
+  const m=evaluate(`PedroStrokeGeometry.recognize({vertices:${JSON.stringify(back)},inTangents:[[0,0],[0,0],[0,0],[0,0]],outTangents:[[0,0],[0,0],[0,0],[0,0]],closed:true})`);
+  assert.ok(Math.abs(m.width-8)<0.0001); assert.ok(Math.abs(m.totalLength-62)<0.0001); assert.equal(m.cap,1);
+});
+test("float32 rounding of any rotated bar is tolerated, a real mismatch is not",()=>{
+  for(const angle of [-55,13,77,123]) for(const [len,w] of [[62,8],[300,2],[40,3]]) {
+    const m=evaluate(`var s=PedroStrokeGeometry.fixture(${len},${w},false,${angle},[431.7,-288.3]);s.vertices=s.vertices.map(function(v){return [${"Math.fround(v[0]),Math.fround(v[1])"}];});PedroStrokeGeometry.recognize(s);`.replace("Math.fround","f32").replace("Math.fround","f32").replace("var s=","function f32(x){var a=new Float32Array(1);a[0]=x;return a[0];}var s="));
+    assert.ok(Math.abs(m.width-w)<0.001,`${angle} ${len}x${w}`);
+  }
+  assert.throws(()=>evaluate(`var s=PedroStrokeGeometry.fixture(62,8,false,-55,[0,0]);s.vertices[2]=[s.vertices[2][0]+0.01,s.vertices[2][1]];PedroStrokeGeometry.recognize(s);`),/rectangle|Unsupported|orthogonal/i);
+});
 test("reversed winding preserves reconstruction",()=>{
   const m=evaluate(`var s=PedroStrokeGeometry.fixture(200,20,true,37,[0,0]);var t=s.inTangents;s.vertices.reverse();s.inTangents=s.outTangents.reverse();s.outTangents=t.reverse();PedroStrokeGeometry.recognize(s);`);
   near(m.width,20);near(m.pathLength,180);

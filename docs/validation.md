@@ -4,6 +4,15 @@ Executed on **2026-10-08**. These are bounded tests, not exhaustive production c
 
 The core/depth evidence below was recorded for `0.1.0-beta.1`; those tools' behavior is unchanged in `0.2.0-beta.1` apart from one Font Inspector message fix. Shape to Stroke, new in `0.2.0-beta.1`, has its own section.
 
+## Native After Effects run — 2026-10-13
+
+All three native suites ran in After Effects 26.5x89 (macOS 27.0.1, Apple Silicon) in a new, empty, unsaved project, driven through a local AE automation panel. The project was empty again afterwards.
+
+- **Core (`tools/native-test.jsx`): 16/16 passed** — Keyframe Tools actions (Space, Step incl. a hand-curved Position path, Keep, keys to layer in/out, trim ignoring markers), Hold scope, Transform to Null 2D/3D/separated/roving with world samples, expression refusal, mask and Source Text keys, Font Inspector.
+- **Shape to Stroke (`experimental/shape-to-stroke/native-test.jsx`): 163/163 passed** after one fix. The first run failed on the Gauge needle icon (a 62 × 8 bar rotated −55°): After Effects stores path points as 32-bit floats, so opposite edges came back 0.0000216 px apart, beyond the rectangle check's edge-length-based tolerance. The rectangle checks now allow jitter proportional to the coordinate size (0.00001 per unit); a 0.01 px real mismatch is still refused. Node tests cover the exact points AE returned and float32-rounded bars at several angles and sizes.
+- **Depth Map (`tools/native-depth-test.jsx`): 7/7 passed** — background sequence job at 24 fps, still parented exactly on its image, reuse of an existing depth map and project item, Depth Reveal and Parallax wiring (effect property names verified), Depth Sweep expression without errors, sequence Reveal adjustment layer, and Cancel stopping Python with no files or layers left. Small model at 112 px input, so this checks the pipeline, not quality or speed.
+- Cleanup found two leftovers, both fixed: Depth Sweep/Reveal left an empty "Solids" folder in the user's project (the tool now removes it when it created it and it ends up empty), and the core and Shape to Stroke suites left one after deleting their nulls/solids (they now remove new empty root folders).
+
 ## Shape to Stroke — 2026-10-09
 
 - **263 Node tests (after the edge-shift rule, removing Reverse and adding icons):** geometric recognition, polygon/rounded offsets, normalized handles/vertices, circle/arc fitting, winding/fill rules, bounds/topology, cyclic starts/reversal, compact dialog/preferences and mocked recovery/write-verification faults. Thickness tests cover the edge-shift rule on 10-, 4- and 100-unit frames (accepted just inside, rejected just outside), the middle width on the deformed Diamond and connector caps, and unchanged angular/concentric checks. All 73 original catalog shapes keep their READY/SKIP classification; 33 new icon layers (16 icons) are all accepted, and a browser preview of their recovered strokes matched the fills. Later tests cover the dialog without Reverse, reading older saved options, the clear unsupported-shape message and refusing ring paths whose Reverse Path Direction is on (value 3; 1 and 2 accepted).
