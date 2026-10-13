@@ -642,6 +642,34 @@ var KeyframeTools = (function () {
             }
         }
     }
+    // After Effects on macOS ignores font sizes in script panels, so N is drawn as strokes, like the icons.
+    // Each digit is a set of polylines in a 6 x 10 box.
+    var DIGITS = {
+        "0": [[0, 0, 6, 0, 6, 10, 0, 10, 0, 0]], "1": [[1.5, 1.5, 3, 0, 3, 10]], "2": [[0, 0, 6, 0, 6, 5, 0, 5, 0, 10, 6, 10]],
+        "3": [[0, 0, 6, 0, 6, 10, 0, 10], [1, 5, 6, 5]], "4": [[0, 0, 0, 5, 6, 5], [6, 0, 6, 10]], "5": [[6, 0, 0, 0, 0, 5, 6, 5, 6, 10, 0, 10]],
+        "6": [[6, 0, 0, 0, 0, 10, 6, 10, 6, 5, 0, 5]], "7": [[0, 0, 6, 0, 6, 10]], "8": [[0, 0, 6, 0, 6, 10, 0, 10, 0, 0], [0, 5, 6, 5]],
+        "9": [[6, 5, 0, 5, 0, 0, 6, 0, 6, 10, 0, 10]], "-": [[1, 5, 5, 5]], ".": [[2.5, 9.5, 3.5, 9.5]]
+    };
+    function drawNumber(tile, text, state) {
+        var g = tile.graphics, w = tile.size[0], h = tile.size[1], glyphs = [], i, j, k;
+        var fill = state && state.leftButtonPressed ? 0.12 : (state && state.mouseOver ? 0.24 : 0.18);
+        g.newPath(); g.rectPath(0, 0, w, h);
+        g.fillPath(g.newBrush(g.BrushType.SOLID_COLOR, [fill, fill, fill, 1]));
+        g.strokePath(g.newPen(g.PenType.SOLID_COLOR, [0.29, 0.29, 0.29, 1], 1));
+        text = String(text);
+        for (i = 0; i < text.length; i++) glyphs.push(DIGITS[text.charAt(i)] || [[1, 9, 5, 1]]);  // anything else: a slash
+        if (!glyphs.length) return;
+        // Digits 14 px tall when they fit, smaller for long numbers; 3 units between digits.
+        var unit = Math.min(1.4, (h - 8) / 10, (w - 8) / (glyphs.length * 9 - 3));
+        var left = (w - (glyphs.length * 9 - 3) * unit) / 2, top = (h - 10 * unit) / 2;
+        var pen = g.newPen(g.PenType.SOLID_COLOR, TONES.icon, Math.max(1, 2 * unit));
+        for (i = 0; i < glyphs.length; i++) for (j = 0; j < glyphs[i].length; j++) {
+            var line = glyphs[i][j], x0 = left + i * 9 * unit;
+            g.newPath(); g.moveTo(x0 + line[0] * unit, top + line[1] * unit);
+            for (k = 2; k < line.length; k += 2) g.lineTo(x0 + line[k] * unit, top + line[k + 1] * unit);
+            g.strokePath(pen);
+        }
+    }
     function kbarArgument() {
         try { if (typeof kbar !== "undefined" && kbar && kbar.button && kbar.button.argument) return String(kbar.button.argument).replace(/^\s+|\s+$/g, "").toLowerCase(); }
         catch (e) {}
@@ -661,16 +689,27 @@ var KeyframeTools = (function () {
         var win = host instanceof Panel ? host : new Window("palette", "Keyframes", undefined, { resizeable: true });
         win.orientation = "column"; win.alignChildren = ["center", "top"]; win.spacing = GAP; win.margins = MARGIN;
 
-        // The N field is one more tile in the grid, the same size as the buttons.
+        // The N field is one more tile in the grid, the same size as the buttons. It shows N drawn large;
+        // clicking it swaps in a normal text field on the same spot until Enter or a click elsewhere.
+        var number = win.add("iconbutton", undefined, undefined, { style: "toolbutton" });
         var amount = win.add("edittext", undefined, readOptions().amount);
-        amount.preferredSize = BUTTON; amount.justify = "center";
-        // The default font looks tiny in a button-sized field.
-        try { amount.graphics.font = ScriptUI.newFont(amount.graphics.font.name, ScriptUI.FontStyle.REGULAR, 16); } catch (e) {}
-        amount.helpTip = "N: frames for Space and Step, keys for Keep";
+        number.preferredSize = amount.preferredSize = BUTTON; amount.justify = "center";
+        number.helpTip = amount.helpTip = "N: frames for Space and Step, keys for Keep. Click to change.";
+        amount.visible = false;
         function options() { return { amount: amount.text }; }
-        amount.onChange = function () { saveOptions(options()); };
+        number.onDraw = function (state) { drawNumber(this, amount.text, state); };
+        number.onClick = function () {
+            amount.location = number.location; amount.size = number.size;
+            number.visible = false; amount.visible = true; amount.active = true;
+        };
+        function finishEditing() {
+            if (!amount.visible) return;
+            amount.visible = false; number.visible = true;
+        }
+        amount.onChange = function () { saveOptions(options()); finishEditing(); };
+        amount.onDeactivate = finishEditing;
 
-        var order = ["space", "step", "keep", "keys-in", "keys-out", "trim-in", "trim-out", "trim-both"], controls = [amount];
+        var order = ["space", "step", "keep", "keys-in", "keys-out", "trim-in", "trim-out", "trim-both"], controls = [number];
         for (var i = 0; i < order.length; i++) (function (name) {
             var button = win.add("iconbutton", undefined, undefined, { style: "toolbutton" });
             button.preferredSize = BUTTON;
@@ -692,6 +731,7 @@ var KeyframeTools = (function () {
                 controls[c].location = [MARGIN + places[c][0], MARGIN + places[c][1]];
                 controls[c].size = BUTTON;
             }
+            amount.location = number.location; amount.size = BUTTON;
         }
         win.onResizing = win.onResize = win.onShow = arrange;
         win.layout.layout(true);
@@ -704,7 +744,7 @@ var KeyframeTools = (function () {
         if (argument) { PedroAE.run("Keyframe Tools", function () { perform(argument, readOptions()); }); return null; }
         return buildPanel(host);
     }
-    return { start: start, perform: perform, decode: decode, icons: ICONS, drawButton: drawButton, flow: flow };
+    return { start: start, perform: perform, decode: decode, icons: ICONS, drawButton: drawButton, drawNumber: drawNumber, flow: flow };
 }());
 KeyframeTools.start(thisObj);
 

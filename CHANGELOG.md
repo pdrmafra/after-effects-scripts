@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Keyframe Tools: the N tile shows its number drawn large (After Effects on macOS ignores font sizes in script panels); click it to type a new value and press Enter.
+
 ## 0.4.0-beta.1 — 2026-10-12
 
 Depth Map overhaul.

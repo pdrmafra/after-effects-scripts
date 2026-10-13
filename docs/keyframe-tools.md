@@ -15,7 +15,7 @@ You can also run it once with **File → Scripts → Run Script File…**; it th
 
 ## The panel, top to bottom
 
-- **N:** one whole number for the first three buttons: frames for Space and Step, keys for Keep. The panel remembers it.
+- **N:** one whole number for the first three buttons: frames for Space and Step, keys for Keep. Click it to type a new value and press Enter. The panel remembers it.
 - **Space:** spaces the selected keys N frames apart, starting from the first selected key. Each property is spaced on its own; unselected keys keep their time.
 - **Step:** adds keys every N frames between the selected keys, following the original animation: values are sampled before anything changes, existing keys are kept, and on Position the motion path keeps its curve. For hard steps, switch the keys to Hold in After Effects afterwards.
 - **Keep:** keeps every Nth selected key (2 keeps every other one) and removes the selected keys between them. The first and last selected keys always stay, and keys you did not select are never removed.

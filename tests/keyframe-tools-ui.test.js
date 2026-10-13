@@ -32,8 +32,10 @@ var thisObj=hostKind==="panel" ? new Panel() : {};`, c);
     click(tip) { vm.runInContext(`${find(tip)}.onClick();`, c); return this; },
     draw(tip, state) { vm.runInContext(`drawn=[];${find(tip)}.onDraw(${JSON.stringify(state || {})});`, c); return JSON.parse(vm.runInContext("JSON.stringify(drawn)", c)); },
     resize(width) { vm.runInContext(`thisObj.size=[${width},400];thisObj.onResize();`, c); return JSON.parse(vm.runInContext(`JSON.stringify(widgets.filter(function(w){return w.type==="edittext"||w.type==="iconbutton";}).map(function(w){return w.location;}))`, c)); },
+    change() { vm.runInContext(`widgets.filter(function(w){return w.type==="edittext";})[0].onChange();`, c); return this; },
+    deactivate() { vm.runInContext(`widgets.filter(function(w){return w.type==="edittext";})[0].onDeactivate();`, c); return this; },
     frames(text) { vm.runInContext(`widgets.filter(function(w){return w.type==="edittext";})[0].text=${JSON.stringify(text)};`, c); return this; },
-    state() { return JSON.parse(JSON.stringify(vm.runInContext(`({buttons:widgets.filter(function(w){return w.type==="iconbutton";}).map(function(w){return w.helpTip.split(":")[0];}),fields:widgets.filter(function(w){return w.type==="edittext";}).map(function(w){return w.text;}),calls:calls,alerts:alerts,record:record,shown:shown})`, c))); }
+    state() { return JSON.parse(JSON.stringify(vm.runInContext(`({buttons:widgets.filter(function(w){return w.type==="iconbutton"&&w.helpTip.indexOf("N:")!==0;}).map(function(w){return w.helpTip.split(":")[0];}),fields:widgets.filter(function(w){return w.type==="edittext";}).map(function(w){return w.text;}),editing:widgets.filter(function(w){return w.type==="edittext";}).map(function(w){return w.visible;}),calls:calls,alerts:alerts,record:record,shown:shown})`, c))); }
   };
 }
 const tips = ["Space", "Step", "Keep", "Keys to layer in", "Keys to layer out", "Trim in", "Trim out", "Trim both"];
@@ -69,6 +71,22 @@ test("the tiles form a column, a 3 x 3 square or a single row, never leaving one
   assert.deepEqual(shape(170), [3, 3]);
   assert.deepEqual(shape(400), [3, 3], "room for 7 columns still gives the square");
   assert.deepEqual(shape(500), [9, 1]);
+});
+test("N is drawn large as strokes; clicking it shows the text field until Enter or a click elsewhere", () => {
+  const ui = run({ saved: "v2|12" });
+  const drawn = ui.draw("N:");
+  assert.equal(drawn[1], "rectPath");
+  assert.equal(drawn.filter(d => d === "stroke").length, 1 + 1 + 1, "border + one stroke for 1 + one for 2");
+  assert.deepEqual(ui.state().editing, [false]);
+  ui.click("N:"); assert.deepEqual(ui.state().editing, [true]);
+  ui.frames("5");
+  ui.change(); assert.deepEqual(ui.state().editing, [false]); assert.equal(ui.state().record, "v2|5");
+  assert.equal(ui.draw("N:").filter(d => d === "stroke").length, 1 + 1);
+  ui.click("N:").deactivate(); assert.deepEqual(ui.state().editing, [false]);
+});
+test("long or odd N values still draw inside the tile", () => {
+  const ui = run();
+  for (const text of ["", "123456", "1.5", "-2", "abc"]) { ui.frames(text); assert.doesNotThrow(() => ui.draw("N:"), text); }
 });
 test("every icon draws its background and shapes in each button state", () => {
   const ui = run();
