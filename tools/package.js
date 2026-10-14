@@ -15,7 +15,7 @@ const files=[
   ...git(["ls-files","depth-map"]).split("\n").filter(Boolean).map(f=>[f,f]),
   ["LICENSE","LICENSE.txt"],["CHANGELOG.md","CHANGELOG.md"]
 ];
-const readme=`After Effects Scripts v${version} — Pedro Mafra
+const readme=`After Effects Scripts v${version} — Transversal
 https://github.com/pdrmafra/after-effects-scripts
 
 INSTALL

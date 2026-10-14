@@ -1,6 +1,6 @@
 # Third-party models and dependencies
 
-Pedro's launcher/backends are covered by the repository MIT license. That license does **not** relicense external models, libraries, fonts or their outputs.
+The launcher and backends in this repository are covered by the repository MIT license. That license does **not** relicense external models, libraries, fonts or their outputs.
 
 No third-party source trees or weights are included in this repository or release ZIP. Users install them separately from their publishers.
 

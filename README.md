@@ -1,6 +1,6 @@
 # After Effects Scripts
 
-Free tools from my motion-design workflow. By [Pedro Mafra](https://pedromafra.com).
+Free tools from a motion designer's workflow, by **Transversal**.
 
 | Tool | What it does | Guide |
 | --- | --- | --- |
@@ -53,7 +53,7 @@ Found a problem or have an idea? [Open an issue](https://github.com/pdrmafra/aft
 
 ## License
 
-My code is [MIT licensed](LICENSE) and provided without warranty. Depth Map's models and dependencies keep their own licenses; see [Third-party notices](depth-map/THIRD_PARTY.md). No font files, client projects or model weights are included.
+The code is [MIT licensed](LICENSE) and provided without warranty. Depth Map's models and dependencies keep their own licenses; see [Third-party notices](depth-map/THIRD_PARTY.md). No font files, client projects or model weights are included.
 
 ## For developers
 
